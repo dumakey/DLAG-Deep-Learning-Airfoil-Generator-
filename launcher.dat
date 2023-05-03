@@ -1,0 +1,75 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% Case folders %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+DATADIR=C:\Users\juan.ramos\DLAG
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% Analysis %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+TYPEANALYSIS=SINGLETRAINING   % SINGLETRAINING, SENSANALYSIS, TRAINGENERATE, GENERATE, DATAGEN, PLOTDATA, PLOTACTIVATIONS
+IMPORTMODEL=0
+AIRFOILANALYSIS=CAMBER  # CAMBER, THICKNESS
+CONDITIONALANALYSIS=1
+
+DPARAMETERS_TRAIN=LERADIUS,TEANGLE,TMAX,ZMAX,ZMIN,DZDX_C # LERADIUS, TEANGLE, TMAX, ZMAX, DZDX_C, DZDX_T
+DZDX_CP_TRAIN=(0.1,0.2,0.3,0.4,0.5)  # Specify chordwise control points, otherwise specify NONE
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% Training parameters %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% Training parameters
+TRAINSIZE=0.75
+LEARNINGRATE=0.015
+L2REG=0.15
+L1REG=NONE
+DROPOUT=0.3
+EPOCHS=120
+BATCHSIZE=128
+LATENTDIM=20
+ENCHIDDENDIM=(200,50)
+DECHIDDENDIM=(50,200)
+ARCHITECTURE=FLAT  # FLAT, CNN, MIXED
+ACTIVATION=ELU  # NONE, RELU, ELU, GELU, LEAKYRELU, SWISH, SIGMOID, TANH
+% When sensitivity analysis, indicate activations separated by commas --> ACTIVATION=RELU,SWISH
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% Dataset Augmentation %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+AUGDATA=1
+AUGDATASIZE=1
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% Image processing %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%IMAGERESIZE=(300,200)  % (width, height)
+IMAGERESIZE=(150,100)  % (width, height)
+
+% Rotation
+ROTATION=1
+ROTATIONCENTER=(NONE,NONE)
+ROTATIONANGLE=-90
+% Zoom
+ZOOM=0
+ZOOMFACTOR=1.3
+% Translation
+TRANSLATION=0
+TRANSLATIONDIST=(0,0)
+% Filter
+FILTER=0
+FILTERTYPE=GAUSSIAN
+FILTERPARAM=(SIZE,5,SIGMA,3)
+%FILTERPARAM=(D,20,SIGMACOLOR,5,SIGMASPACE,3)
+% Flip
+FLIP=0
+FLIPTYPE=VERTICAL
+%FLIPTYPE=HORIZONTAL
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% Samples generation %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+DPARAMETERS_DES=(LERADIUS,0.05,TEANGLE,20,TMAX,0.05,ZMAX,0.06,ZMIN,-0.01,DZDX_C,(0.1,0.2),DZDX_T,NONE)
+AIRFOILANALYSIS_DES=CAMBER # CAMBER, THICKNESS
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% Activation plotting %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+NCOLS=3
+ROWS2COLS=1
+NSAMPLESACT=1
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
