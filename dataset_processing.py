@@ -32,6 +32,7 @@ def preprocess_data(im_tilde, im):
 def create_dataset_pipeline(dataset, is_train=True, num_threads=8, prefetch_buffer=100, batch_size=32):
 
     dataset_tensor = tf.data.Dataset.from_tensor_slices(dataset)
+
     if is_train:
         dataset_tensor = dataset_tensor.shuffle(buffer_size=dataset[0].shape[0]).repeat()
     dataset_tensor = dataset_tensor.map(preprocess_tf_data,num_parallel_calls=num_threads)
@@ -42,9 +43,15 @@ def create_dataset_pipeline(dataset, is_train=True, num_threads=8, prefetch_buff
 
 def get_tensorflow_datasets(data_train,data_cv,data_test,batch_size=32):
 
-    dataset_train = create_dataset_pipeline(data_train,is_train=True,batch_size=batch_size)
-    dataset_cv = create_dataset_pipeline(data_cv,is_train=False,batch_size=1)
-    dataset_test = preprocess_data(data_test[0],data_test[1])
+    # Prepare tensor structures from data (image dataset + design vector data)
+    tensor_dataset_train = create_dataset_pipeline(data_train,is_train=True,batch_size=batch_size)
+    tensor_dataset_cv = create_dataset_pipeline(data_cv,is_train=False,batch_size=1)
+    tensor_dataset_test = preprocess_data(data_test[0],data_test[1])
+
+    # Prepare datasets
+    dataset_train = [tensor_dataset_train.element_spec[0],tensor_dataset_train.element_spec[1]]
+    dataset_cv = [tensor_dataset_cv.element_spec[0],tensor_dataset_cv.element_spec[1]]
+    dataset_test = [tensor_dataset_test[0],tensor_dataset_test[1]]
 
     return dataset_train, dataset_cv, dataset_test
 
@@ -125,16 +132,15 @@ def plot_dataset(dataset_folder, fpaths, dataset_type='Training'):
         fig.savefig(os.path.join(plots_folder,'upperside',name),dpi=200)
         plt.close()
 
-def add_design_parameters(samples, X, airfoil_data, case_folder):
+def get_design_dataset(samples, X, airfoil_data, case_folder):
 
-    r, m = X.shape  # number of samples and dimension of samples in the dataset provided
+    r = X.shape[0]  # number of samples and dimension of samples in the dataset provided
     s = len(airfoil_data[samples[0]].values()) # get size of design vector
-    X_augm = np.zeros([r,m+s],dtype='float')
+    b = np.zeros([r,s],dtype='float')
     for i,sample in enumerate(samples):
-        b = list(airfoil_data[sample].values())
-        X_augm[i,:] = np.concatenate((b,X[i,:]),axis=0)
-        
-    return X_augm
+        b[i,:] = list(airfoil_data[sample].values())
+
+    return b
     
 def get_datasets(case_folder, design_parameters, training_size, img_dims, cond_analysis=True, airfoil_analysis='camber'):
 
@@ -150,6 +156,7 @@ def get_datasets(case_folder, design_parameters, training_size, img_dims, cond_a
     samples_val_mask = [True if sample in samples_val else False for sample in samples]
     X_val = X[samples_val_mask]
 
+    # Split validation set into cross-validation set and test set
     samples_cv, samples_test = train_test_split(samples_val,train_size=0.75,shuffle=True)
     samples_cv_mask = [True if sample in samples_cv else False for sample in samples_val]
     X_cv = X_val[samples_cv_mask]
@@ -157,7 +164,7 @@ def get_datasets(case_folder, design_parameters, training_size, img_dims, cond_a
     X_test = X_val[samples_test_mask]
 
     # Get design parameters and normalize design matrix
-    aerodata = airfoil_reader.get_aerodata(design_parameters,case_folder,airfoil_analysis,add_geometry=False)
+    aerodata = airfoil_reader.get_aerodata(design_parameters,case_folder,airfoil_analysis,mode='train',add_geometry=False)
     aerodata_norm = dict.fromkeys(aerodata)
     r = len(aerodata)  # number of total (training + validation) samples
     s = len(aerodata[samples[0]].keys()) # get size of design vector
@@ -170,14 +177,14 @@ def get_datasets(case_folder, design_parameters, training_size, img_dims, cond_a
     for j,airfoil in enumerate(aerodata_norm.keys()):
         aerodata_norm[airfoil] = OrderedDict(zip(aerodata[samples[0]].keys(),b_norm[j,:]))
 
+    # Get design dataset
     if cond_analysis == True:
-        # Augment datasets with design parameters
-        X_train = add_design_parameters(samples_train,X_train,aerodata_norm,case_folder)
-        X_cv = add_design_parameters(samples_cv,X_cv,aerodata_norm,case_folder)
-        X_test = add_design_parameters(samples_test,X_test,aerodata_norm,case_folder)
+        b_train = get_design_dataset(samples_train,X_train,aerodata_norm,case_folder)
+        b_cv = get_design_dataset(samples_cv,X_cv,aerodata_norm,case_folder)
+        b_test = get_design_dataset(samples_test,X_test,aerodata_norm,case_folder)
 
-    data_train = (X_train, X_train)
-    data_cv = (X_cv, X_cv)
-    data_test = (X_test, X_test)
+    data_train = X_train
+    data_cv = X_cv
+    data_test = X_test
     
-    return samples_train, data_train, samples_cv, data_cv, samples_test, data_test
+    return samples_train, data_train, b_train, samples_cv, data_cv, b_cv, samples_test, data_test, b_cv

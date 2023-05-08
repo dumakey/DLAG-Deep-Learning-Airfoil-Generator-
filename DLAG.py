@@ -121,16 +121,16 @@ class CGenTrainer:
         airfoil_analysis = self.parameters.analysis['airfoil_analysis']
         cond_analysis = self.parameters.analysis['conditional']
 
-        self.airfoil_reconstruction(plot_full_airfoil=True)
-
         # Read dataset
-        self.datasets.samples_train, self.datasets.data_train, \
-        self.datasets.samples_cv, self.datasets.data_cv, \
-        self.datasets.samples_test, self.datasets.data_test = \
+        self.datasets.samples_train, self.datasets.data_train, self.datasets.b_train, \
+        self.datasets.samples_cv, self.datasets.data_cv, self.datasets.b_cv, \
+        self.datasets.samples_test, self.datasets.data_test, self.datasets.b_test = \
         dataset_processing.get_datasets(case_dir,design_parameters_train,training_size,img_size,cond_analysis,airfoil_analysis)
         
         self.datasets.dataset_train, self.datasets.dataset_cv, self.datasets.dataset_test = \
-        dataset_processing.get_tensorflow_datasets(self.datasets.data_train,self.datasets.data_cv,self.datasets.data_test,batch_size)
+        dataset_processing.get_tensorflow_datasets((self.datasets.data_train,self.datasets.b_train),
+                                                   (self.datasets.data_cv,self.datasets.b_cv),
+                                                   (self.datasets.data_test,self.datasets.b_test),batch_size)
 
         # Train
         if self.model.imported == False:
@@ -151,9 +151,9 @@ class CGenTrainer:
         cond_analysis = self.parameters.analysis['conditional']
 
         # Read dataset
-        self.datasets.samples_train, self.datasets.data_train, \
-        self.datasets.samples_cv, self.datasets.data_cv, \
-        self.datasets.samples_test, self.datasets.data_test = \
+        self.datasets.samples_train, self.datasets.data_train, self.datasets.b_train, \
+        self.datasets.samples_cv, self.datasets.data_cv, self.datasets.b_cv, \
+        self.datasets.samples_test, self.datasets.data_test, self.datasets.b_test = \
         dataset_processing.get_datasets(case_dir,design_parameters,training_size,img_size,cond_analysis,airfoil_analysis)
 
         self.datasets.dataset_train, self.datasets.dataset_cv, self.datasets.dataset_test = \
@@ -184,9 +184,40 @@ class CGenTrainer:
             rmtree(storage_dir)
         os.makedirs(storage_dir)
 
+        # Set design parameters dictionary
+        # Read case parameters from "pretrained model" folder
+        casedata = reader.read_case_logfile(os.path.join(self.case_dir,'Results','pretrained_model','DLAG.log'))
+        design_parameters_on_logfile = [item for item in casedata.design_parameters_train.keys() if item != 'xdzdx']  # exclude (training) slope controlpoints x-locations
+        design_parameters_on_launch = self.parameters.design_parameters_des
+        bcheck = set([True if item in design_parameters_on_logfile else False
+                      for item in self.parameters.design_parameters_des.keys() if not item.startswith('dzdx')])
+        if bcheck != {True}: # if not all design parameters are included in the (design) parameters used for training
+            self.parameters.design_parameters_des = OrderedDict(casedata.design_parameters_train)
+            # delete the parameter corresponding to the specification of the slope controlpoints x-loc
+            if 'xdzdx' in self.parameters.design_parameters_des:
+                del self.parameters.design_parameters_des['xdzdx']
+            # Assign the specified design parameters to the "available" training design parameters
+            for parameter, value in design_parameters_on_launch.items():
+                if parameter in self.parameters.design_parameters_des.keys():
+                    self.parameters.design_parameters_des[parameter] = value
+            # If not all the specified design parameters match with the training design parameters
+            if None in self.parameters.design_parameters_des.values():
+                raise Exception('There are design parameters specified which were not used for training.\n'
+                                'The list of design parameters used for training are:\n'
+                                '{}'.format(list(casedata.design_parameters_train.keys())))
+
+        # Add the curvature control points design parameters, if they exist
+        dzdx_cp = [design_parameters_on_launch[item] for item in design_parameters_on_launch.keys()
+                   if item == 'dzdx_c' or item == 'dzdx_t']
+        if dzdx_cp:
+            if 'dzdx_c' in design_parameters_on_launch.keys():
+                self.parameters.design_parameters_des['dzdx'] = ('camber',design_parameters_on_launch['dzdx_c'])
+            elif 'dzdx_t' in design_parameters_on_launch.keys():
+                self.parameters.design_parameters_des['dzdx'] = ('thickness',design_parameters_on_launch['dzdx_t'])
+        casedata.design_parameters_des = self.parameters.design_parameters_des.copy()
+
         # Read parameters
         case_dir = self.case_dir
-        casedata = reader.read_case_logfile(os.path.join(case_dir,'Results','pretrained_model','DLAG.log'))
         n_samples = self.parameters.samples_generation['n_samples']
         training_size = casedata.training_parameters['train_size']
         img_size = casedata.img_size
@@ -194,20 +225,22 @@ class CGenTrainer:
         if self.model.imported == False:
             self.singletraining()
 
+        '''
         if not hasattr(self, 'data_train'):
-            data_train, data_cv, data_test = dataset_processing.get_datasets(case_dir,training_size,img_size)
+            samples_train, data_train, b_train, samples_cv, data_cv, b_cv, samples_test, data_test, b_cv = \
+                dataset_processing.get_datasets(case_dir,self.parameters.design_parameters_des,training_size,img_size)
             for model in self.model.Model:
-                Postprocessing.plot_dataset_samples(data_train,model.predict,n_samples,img_size,storage_dir,stage='Train')
-                Postprocessing.plot_dataset_samples(data_cv,model.predict,n_samples,img_size,storage_dir,stage='Cross-validation')
-                Postprocessing.plot_dataset_samples(data_test,model.predict,n_samples,img_size,storage_dir,stage='Test')
-
+                postprocessing.plot_dataset_samples(data_train,model.predict,n_samples,img_size,storage_dir,stage='Train')
+                postprocessing.plot_dataset_samples(data_cv,model.predict,n_samples,img_size,storage_dir,stage='Cross-validation')
+                postprocessing.plot_dataset_samples(data_test,model.predict,n_samples,img_size,storage_dir,stage='Test')
+        '''
         ## GENERATE NEW DATA - SAMPLING ##
         X_samples = self.generate_samples(casedata)
-        Postprocessing.plot_generated_samples(X_samples,img_size,storage_dir)
+        postprocessing.plot_generated_samples(X_samples,img_size,storage_dir)
 
     def airfoil_reconstruction(self, plot_full_airfoil=False):
 
-        m = 4
+        m = 10
         airfoil_container = airfoil_reader.get_aerodata({},self.case_dir,self.parameters.analysis['airfoil_analysis'],add_geometry=True)
         for name,airfoil in airfoil_container.items():
             x = airfoil['x']
@@ -280,7 +313,6 @@ class CGenTrainer:
             if not os.path.isdir(folder_path):
                 os.mkdir(folder_path)
             plt.savefig(os.path.join(folder_path,figurename),dpi=200,format=None,orientation="landscape")
-        print()
 
     def data_generation(self):
 
@@ -342,7 +374,7 @@ class CGenTrainer:
         # Plot
         for idx in idx_set:
             img = dataset[idx,:]
-            Postprocessing.monitor_hidden_layers(img,encoder,case_dir,figs_per_row,rows_to_cols_ratio,idx)
+            postprocessing.monitor_hidden_layers(img,encoder,case_dir,figs_per_row,rows_to_cols_ratio,idx)
         
     def generate_augmented_data(self, transformations, augmented_dataset_size=1):
 
@@ -360,7 +392,7 @@ class CGenTrainer:
 
         # Parameters
         input_dim = self.parameters.img_size
-        n_dest = len(self.parameters.design_parameters_train.keys()) + len(self.parameters.design_parameters_train['dzdx'][1]) - 1
+        n_dest = len(self.parameters.design_parameters_train.keys()) + len(self.parameters.design_parameters_train['xdzdx'][1]) - 1
         latent_dim = self.parameters.training_parameters['latent_dim']
         enc_hidden_layers = self.parameters.training_parameters['enc_hidden_layers']
         dec_hidden_layers = self.parameters.training_parameters['dec_hidden_layers']
@@ -371,22 +403,23 @@ class CGenTrainer:
         l1_reg = self.parameters.training_parameters['l1_reg']
         dropout = self.parameters.training_parameters['dropout']
         activation = self.parameters.training_parameters['activation']
-        architecture = self.parameters.training_parameters['architecture']
 
         self.model.Model = []
         self.model.History = []
         Model = models.VAEC
         if sens_var == None:  # If it is a one-time training
             self.model.Model.append(Model(input_dim,n_dest,latent_dim,enc_hidden_layers,dec_hidden_layers,alpha,l2_reg,
-                                               l1_reg,dropout,activation,mode='train',architecture=architecture))
-            self.model.History.append(self.model.Model[-1].fit(self.datasets.dataset_train,epochs=nepoch,steps_per_epoch=200,
-                                                      validation_data=self.datasets.dataset_cv,validation_steps=None,verbose=1))
+                                               l1_reg,dropout,activation,mode='train'))
+            self.model.History.append(self.model.Model[-1].fit(x=[self.datasets.data_train,self.datasets.b_train],
+                                                               y=self.datasets.data_train,batch_size=batch_size,epochs=nepoch,steps_per_epoch=200,
+                                                               validation_data=([self.datasets.data_cv,self.datasets.b_cv],
+                                                               self.datasets.data_cv),validation_steps=None,verbose=1))
         else: # If it is a sensitivity analysis
             if type(alpha) == list:
                 for learning_rate in alpha:
                     if self.model.imported == False:
                         model = Model(input_dim,n_dest,latent_dim,enc_hidden_layers,dec_hidden_layers,learning_rate,
-                                           l2_reg,l1_reg,dropout,activation,mode='train',architecture=architecture)
+                                           l2_reg,l1_reg,dropout,activation,mode='train')
                     self.model.Model.append(model)
                     self.model.History.append(model.fit(self.datasets.dataset_train,epochs=nepoch,steps_per_epoch=200,
                                                         validation_data=self.datasets.dataset_cv,validation_steps=None,
@@ -395,7 +428,7 @@ class CGenTrainer:
                 for regularizer in l2_reg:
                     if self.model.imported == False:
                         model = Model(input_dim,n_dest,latent_dim,enc_hidden_layers,dec_hidden_layers,alpha,regularizer,
-                                           l1_reg,dropout,activation,mode='train',architecture=architecture)
+                                           l1_reg,dropout,activation,mode='train')
                     self.model.Model.append(model)
                     self.model.History.append(model.fit(self.datasets.dataset_train,epochs=nepoch,steps_per_epoch=200,
                                                         validation_data=self.datasets.dataset_cv,validation_steps=None,
@@ -404,7 +437,7 @@ class CGenTrainer:
                 for regularizer in l1_reg:
                     if self.model.imported == False:
                         model = Model(input_dim,n_dest,latent_dim,enc_hidden_layers,dec_hidden_layers,alpha,l2_reg,
-                                           regularizer,dropout,activation,mode='train',architecture=architecture)
+                                           regularizer,dropout,activation,mode='train')
                     self.model.Model.append(model)
                     self.model.History.append(model.fit(self.datasets.dataset_train,epochs=nepoch,steps_per_epoch=200,
                                                         validation_data=self.datasets.dataset_cv,validation_steps=None,
@@ -413,7 +446,7 @@ class CGenTrainer:
                 for rate in dropout:
                     if self.model.imported == False:
                         model = Model(input_dim,n_dest,latent_dim,enc_hidden_layers,dec_hidden_layers,alpha,l2_reg,
-                                           l1_reg,rate,activation,mode='train',architecture=architecture)
+                                           l1_reg,rate,activation,mode='train')
                     self.model.Model.append(model)
                     self.model.History.append(model.fit(self.datasets.dataset_train,epochs=nepoch,steps_per_epoch=200,
                                                         validation_data=self.datasets.dataset_cv,validation_steps=None,
@@ -422,7 +455,7 @@ class CGenTrainer:
                 for act in activation:
                     if self.model.imported == False:
                         model = Model(input_dim,n_dest,latent_dim,enc_hidden_layers,dec_hidden_layers,alpha,l2_reg,
-                                           l1_reg,dropout,act,mode='train',architecture=architecture)
+                                           l1_reg,dropout,act,mode='train')
                     self.model.Model.append(model)
                     self.model.History.append(model.fit(self.datasets.dataset_train,epochs=nepoch,steps_per_epoch=200,
                                                         validation_data=self.datasets.dataset_cv,validation_steps=None,
@@ -431,7 +464,7 @@ class CGenTrainer:
                 for dim in latent_dim:
                     if self.model.imported == False:
                         model = Model(input_dim,n_dest,dim,enc_hidden_layers,dec_hidden_layers,alpha,l2_reg,l1_reg,dropout,
-                                           activation,mode='train',architecture=architecture)
+                                           activation,mode='train')
                     self.model.Model.append(model)
                     self.model.History.append(model.fit(self.datasets.dataset_train,epochs=nepoch,steps_per_epoch=200,
                                                         validation_data=self.datasets.dataset_cv,validation_steps=None,
@@ -439,23 +472,36 @@ class CGenTrainer:
 
     def generate_samples(self, parameters):
 
+        def build_design_vector(design_parameters):
+
+            n_dpar = len(design_parameters.keys()) - 1 + len(design_parameters['dzdx'][-1])
+            vector = np.zeros((n_dpar,))
+            i = 0
+            for parameter, value in design_parameters.items():
+                if parameter != 'dzdx':
+                    vector[i] = value
+                    i += 1
+                else:
+                    for dzdx in value[1]:
+                        vector[i] = dzdx
+                        i += 1
+
+            vector_tf = tf.convert_to_tensor(vector)
+
+            return tf.reshape(vector_tf,(1,n_dpar))
+
         ## BUILD DECODER ##
         output_dim = parameters.img_size
         latent_dim = parameters.training_parameters['latent_dim']
         alpha = parameters.training_parameters['learning_rate']
         dec_hidden_layers = parameters.training_parameters['dec_hidden_layers']
         activation = parameters.training_parameters['activation']
-        architecture = parameters.training_parameters['architecture']
         training_size = parameters.training_parameters['train_size']
         batch_size = parameters.training_parameters['batch_size']
         n_samples = self.parameters.samples_generation['n_samples']
-        airfoil_design = self.parameters.analysis['airfoil_analysis_des']
-        if airfoil_design == 'camber':
-            n_desd = (len(self.parameters.design_parameters_des.keys()) - 2) + len(self.parameters.design_parameters_des['dzdx_c'])
-        elif airfoil_design == 'thickness':
-            n_desd = (len(self.parameters.design_parameters_des.keys()) - 2) + len(self.parameters.design_parameters_des['dzdx_t'])
+        n_dpar = len(parameters.design_parameters_des.keys()) - 1 + len(parameters.design_parameters_des['dzdx'][-1])
 
-        decoder = models.VAEC(output_dim,n_desd,latent_dim,[],dec_hidden_layers,alpha,0.0,0.0,0.0,activation,'sample',architecture)  # No regularization
+        decoder = models.VAEC(output_dim,n_dpar,latent_dim,[],dec_hidden_layers,alpha,0.0,0.0,0.0,activation,'sample')  # No regularization
         
         X_samples = []
         for model in self.model.Model:
@@ -475,7 +521,8 @@ class CGenTrainer:
             samples = np.zeros([n_samples,np.prod(output_dim)])
             for i in range(n_samples):
                 t = tf.random.normal(shape=(1,latent_dim))
-                samples[i,:] = decoder.predict(t,steps=1)
+                b_des = build_design_vector(parameters.design_parameters_des)
+                samples[i,:] = decoder.predict([t,b_des],steps=1)
             X_samples.append(samples)
 
         return X_samples
@@ -629,16 +676,15 @@ class CGenTrainer:
         try:
             casedata = reader.read_case_logfile(os.path.join(storage_dir,'DLAG.log'))
             img_dim = casedata.img_size
-            n_dest = len(casedata.design_parameters_train)
+            n_dest = len(casedata.design_parameters_train.keys()) + len(casedata.design_parameters_train['xdzdx'][1]) - 1
             latent_dim = casedata.training_parameters['latent_dim']
             enc_hidden_layers = casedata.training_parameters['enc_hidden_layers']
             dec_hidden_layers = casedata.training_parameters['dec_hidden_layers']
             activation = casedata.training_parameters['activation']
-            architecture = casedata.training_parameters['architecture']
 
             # Load weights into new model
             Model = models.VAEC(img_dim,n_dest,latent_dim,enc_hidden_layers,dec_hidden_layers,0.001,0.0,0.0,0.0,activation,
-                               mode,architecture)
+                               mode)
             weights_filename = [file for file in os.listdir(storage_dir) if file.endswith('.h5')][0]
             Model.load_weights(os.path.join(storage_dir,weights_filename))
             class history_container:
@@ -709,7 +755,6 @@ class CGenTrainer:
     def export_nn_log(self):
         def update_log(parameters, model):
             training = OrderedDict()
-            training['ARCHITECTURE'] = parameters.training_parameters['architecture']
             training['TRAINING SIZE'] = parameters.training_parameters['train_size']
             training['LEARNING RATE'] = parameters.training_parameters['learning_rate']
             training['L2 REGULARIZER'] = parameters.training_parameters['l2_reg']
@@ -724,9 +769,17 @@ class CGenTrainer:
             training['OPTIMIZER'] = [model.optimizer._name for model in model.Model]
             training['METRICS'] = [model.metrics_names[-1] if model.metrics_names != None else None for model in model.Model]
 
+            design = OrderedDict()
+            design['DESIGN PARAMETERS TRAIN'] = [item.upper() for item in parameters.design_parameters_train.keys() if item != 'xdzdx']
+            design['DESIGN PARAMETERS TRAIN'].append('XDZDX_C' if parameters.analysis['airfoil_analysis'] == 'camber' else 'XDZDX_T')
+            design['XDZDX CONTROLPOINTS TRAIN'] = parameters.design_parameters_train['xdzdx'][-1]
+
             analysis = OrderedDict()
             analysis['CASE ID'] = parameters.analysis['case_ID']
             analysis['ANALYSIS'] = parameters.analysis['type']
+            analysis['CONDITIONAL ANALYSIS'] = parameters.analysis['conditional']
+            analysis['AIRFOIL ANALYSIS'] = parameters.analysis['airfoil_analysis']
+            analysis['DESIGN AIRFOIL ANALYSIS'] = parameters.analysis['airfoil_analysis_des']
             analysis['IMPORTED MODEL'] = parameters.analysis['import']
             analysis['LAST TRAINING LOSS'] = ['{:.3f}'.format(history.history['loss'][-1]) for history in model.History]
             analysis['LAST CV LOSS'] = ['{:.3f}'.format(history.history['val_loss'][-1]) for history in model.History]
@@ -734,7 +787,7 @@ class CGenTrainer:
             architecture = OrderedDict()
             architecture['INPUT SHAPE'] = parameters.img_size
 
-            return training, analysis, architecture
+            return training, design, analysis, architecture
 
 
         parameters = self.parameters
@@ -742,7 +795,7 @@ class CGenTrainer:
             varname, varvalues = parameters.sens_variable
             for value in varvalues:
                 parameters.training_parameters[varname] = value
-                training, analysis, architecture = update_log(parameters,self.model)
+                training, design, analysis, architecture = update_log(parameters,self.model)
 
                 case_ID = parameters.analysis['case_ID']
                 if type(value) == str:
@@ -760,6 +813,10 @@ class CGenTrainer:
                     for item in training.items():
                         f.write(item[0] + '=' + str(item[1]) + '\n')
                     f.write('--------------------------------------------------------------------------------------------------\n')
+                    f.write('->DESIGN\n')
+                    for item in design.items():
+                        f.write(item[0] + '=' + str(item[1]) + '\n')
+                    f.write('--------------------------------------------------------------------------------------------------\n')
                     f.write('->ARCHITECTURE\n')
                     for item in architecture.items():
                         f.write(item[0] + '=' + str(item[1]) + '\n')
@@ -770,7 +827,7 @@ class CGenTrainer:
                     f.write('==================================================================================================\n')
 
         else:
-            training, analysis, architecture = update_log(self.parameters,self.model)
+            training, design, analysis, architecture = update_log(self.parameters,self.model)
             case_ID = parameters.analysis['case_ID']
             storage_folder = os.path.join(self.case_dir,'Results',str(case_ID))
             with open(os.path.join(storage_folder,'Model','DLAG.log'),'w') as f:
@@ -784,6 +841,11 @@ class CGenTrainer:
                     '--------------------------------------------------------------------------------------------------\n')
                 f.write('->TRAINING\n')
                 for item in training.items():
+                    f.write(item[0] + '=' + str(item[1]) + '\n')
+                f.write(
+                    '--------------------------------------------------------------------------------------------------\n')
+                f.write('->DESIGN\n')
+                for item in design.items():
                     f.write(item[0] + '=' + str(item[1]) + '\n')
                 f.write(
                     '--------------------------------------------------------------------------------------------------\n')

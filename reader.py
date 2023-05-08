@@ -143,7 +143,7 @@ def read_case_setup(launch_filepath):
             casedata.training_parameters['batch_size'] = int(match.group(1))
 
     # Activation function
-    match = re.search('ACTIVATION\s*=\s*((\w+)\s*(,?\s*\w+,?)*)\s*.*', data)
+    match = re.search('ACTIVATION\s*=\s*((\w+)\s*(,?\s*\w+,?)*)\s*\n+.*', data)
     if match:
         matches = re.findall('(\w+)',match.group(1))
         if matches:
@@ -152,47 +152,66 @@ def read_case_setup(launch_filepath):
             else:
                 casedata.training_parameters['activation'] = [str.lower(item) for item in matches]
 
-    # NN architecture
-    match = re.search('ARCHITECTURE\s*=\s*(\w+).*', data)
-    if match:
-        casedata.training_parameters['architecture'] = str.lower(match.group(1))
-
     ############################################### Design parameters ##################################################
-    # Design parameters (training)
-    match = re.search('DPARAMETERS_TRAIN\s*=\s*((\w+)\s*(,?\s*\w+,?)*)\s*.*', data)
+    # Number of samples
+    match = re.search('NSAMPLESGEN\s*=\s*(\d+|NONE).*', data)
     if match:
-        matches = re.findall('(\w+)',match.group(1))
-        if matches:
-            if len(matches) == 1:
-                casedata.design_parameters_train['parameters'] = str.lower(matches[0])
-            else:
-                casedata.design_parameters_train['parameters'] = [str.lower(item) for item in matches]
+        if match.group(1) == 'NONE':
+            casedata.samples_generation['n_samples'] = 1
+        else:
+            casedata.samples_generation['n_samples'] = int(match.group(1))
+
+    # Design parameters (training)
+    match = re.search('DPARAMETERS_TRAIN\s*=\s*\(\s*LERADIUS\s*\,\s*(\d)\s*\,\s*TEANGLE\s*\,\s*(\d)\s*\,'
+                      '\s*TMAX\s*\,\s*(\d)\s*\,\s*ZMAX\s*\,\s*(\d)\s*\,\s*ZMIN\s*\,\s*(\d)\s*\,\s*ZLE\s*\,\s*(\d)\s*\,'
+                      '\s*ZTE\s*\,\s*(\d)\s*\,\s*DZDX_C\s*\,\s*(\d)\s*\,\s*DZDX_T\s*\,\s*(\d)\s*\).*',data)
+    if match:
+        casedata.design_parameters_train['parameters'] = []
+        if match.group(1) == '1':
+            casedata.design_parameters_train['parameters'].append('leradius')
+        if match.group(2) == '1':
+            casedata.design_parameters_train['parameters'].append('teangle')
+        if match.group(3) == '1':
+            casedata.design_parameters_train['parameters'].append('tmax')
+        if match.group(4) == '1':
+            casedata.design_parameters_train['parameters'].append('zmax')
+        if match.group(5) == '1':
+            casedata.design_parameters_train['parameters'].append('zmin')
+        if match.group(6) == '1':
+            casedata.design_parameters_train['parameters'].append('zle')
+        if match.group(7) == '1':
+            casedata.design_parameters_train['parameters'].append('zte')
+        if match.group(8) == '1':
+            casedata.design_parameters_train['parameters'].append('dzdx_c')
+        if match.group(9) == '1':
+            casedata.design_parameters_train['parameters'].append('dzdx_t')
 
     # DZDX controlpoints (training)
-    match = re.search('DZDX_CP_TRAIN\s*=\s*(.*|NONE)', data)
+    match = re.search('XDZDX_CP_TRAIN\s*=\s*(.*|NONE)', data)
     if match:
         matches = re.findall('(\d+\.?\d*)',match.group(1))
         if matches:
-            casedata.design_parameters_train['dzdx_cp'] = float(matches[0]) if len(matches) == 1 else [float(item) for item in matches]
+            casedata.design_parameters_train['xdzdx_cp'] = float(matches[0]) if len(matches) == 1 else [float(item) for item in matches]
         else:
-            casedata.design_parameters_train['dzdx_cp'] = None
+            casedata.design_parameters_train['xdzdx_cp'] = None
 
-    # Design parameters standardisation (training)
+    # Slope design parameters standardisation (training)
     casedata.design_parameters_train_std = dict.fromkeys(casedata.design_parameters_train['parameters'])
-    if casedata.design_parameters_train['dzdx_cp'] != None:
+    if casedata.design_parameters_train['xdzdx_cp'] != None:
         if 'dzdx_c' in casedata.design_parameters_train_std:
             del casedata.design_parameters_train_std['dzdx_c']
-            casedata.design_parameters_train_std['dzdx'] = ('camber',casedata.design_parameters_train['dzdx_cp'])
+            casedata.design_parameters_train_std['xdzdx'] = ('camber',casedata.design_parameters_train['xdzdx_cp'])
         elif 'dzdx_t' in casedata.design_parameters_train_std:
             del casedata.design_parameters_train_std['dzdx_t']
-            casedata.design_parameters_train_std['dzdx'] = ('thickness',casedata.design_parameters_train['dzdx_cp'])
+            casedata.design_parameters_train_std['xdzdx'] = ('thickness',casedata.design_parameters_train['xdzdx_cp'])
     casedata.design_parameters_train = casedata.design_parameters_train_std
     del casedata.design_parameters_train_std
 
     # Design parameters (generation)
     match = re.search('DPARAMETERS_DES\s*=\s*\(\s*LERADIUS\s*\,\s*(.*|NONE)\s*\,\s*TEANGLE\s*\,\s*(.*|NONE)\s*\,'
                       '\s*TMAX\s*\,\s*(.*|NONE)\s*\,\s*ZMAX\s*\,\s*(.*|NONE)\s*\,\s*ZMIN\s*\,\s*(.*|NONE)\s*\,'
-                      '\s*DZDX_C\s*\,\s*\(*(.*|NONE)\s*\)*\s*\,\s*DZDX_T\s*\,\s*\(*(.*|NONE)\)*\s*\).*', data)
+                      '\s*ZLE\s*\,\s*(.*|NONE)\s*\,\s*ZTE\s*\,\s*(.*|NONE)\s*\,\s*DZDX_C\s*\,\s*\(*(.*|NONE)\s*\)*\s*\,'
+                      '\s*DZDX_T\s*\,\s*\(*(.*|NONE)\)*\s*\).*', data)
     if match:
         if match.group(1) != 'NONE':
             casedata.design_parameters_des['leradius'] = float(match.group(1))
@@ -205,13 +224,17 @@ def read_case_setup(launch_filepath):
         if match.group(5) != 'NONE':
             casedata.design_parameters_des['zmin'] = float(match.group(5))
         if match.group(6) != 'NONE':
-            dzdx_c_matches = re.findall('(\d+\.*\d+)', match.group(6))
+            casedata.design_parameters_des['zle'] = float(match.group(6))
+        if match.group(7) != 'NONE':
+            casedata.design_parameters_des['zte'] = float(match.group(7))
+        if match.group(8) != 'NONE':
+            dzdx_c_matches = re.findall('(\-*\d+\.*\d+)', match.group(8))
             if len(dzdx_c_matches) != 0:
                 casedata.design_parameters_des['dzdx_c'] = [float(item) for item in dzdx_c_matches]
             else:
                 casedata.design_parameters_des['dzdx_c'] = None
-        if match.group(7) != 'NONE':
-            dzdx_t_matches = re.findall('(\d+\.*\d+)', match.group(7))
+        if match.group(9) != 'NONE':
+            dzdx_t_matches = re.findall('(\-*\d+\.*\d+)', match.group(9))
             if len(dzdx_t_matches) != 0:
                 casedata.design_parameters_des['dzdx_t'] = [float(item) for item in dzdx_t_matches]
             else:
@@ -302,6 +325,7 @@ def read_case_setup(launch_filepath):
     return casedata
 
 def read_case_logfile(log_filepath):
+
     file = open(log_filepath, 'r')
     data = file.read()
     data = re.sub('%.*\n','', data)
@@ -312,6 +336,7 @@ def read_case_logfile(log_filepath):
     casedata = setup()
     casedata.analysis = dict.fromkeys(['case_ID','type', 'import'], None)
     casedata.training_parameters = dict()
+    casedata.design_parameters_train = dict()
     casedata.img_resize = [None,None]
 
     ################################################## Analysis ########################################################
@@ -324,6 +349,21 @@ def read_case_logfile(log_filepath):
     match = re.search('ANALYSIS\s*=\s*(\w+).*', data)
     if match:
         casedata.analysis['type'] = str.lower(match.group(1))
+
+    # Conditional analysis
+    match = re.search('CONDITIONAL ANALYSIS\s*=\s*(\d).*', data)
+    if match:
+        casedata.analysis['conditional'] = int(match.group(1))
+
+    # Type of airfoil analysis (camber/thickness)
+    match = re.search('AIRFOIL ANALYSIS\s*=\s*(\w+).*', data)
+    if match:
+        casedata.analysis['airfoil_analysis'] = str.lower(match.group(1))
+
+    # Type of airfoil analysis (camber/thickness)
+    match = re.search('DESIGN AIRFOIL ANALYSIS\s*=\s*(\w+).*', data)
+    if match:
+        casedata.analysis['airfoil_analysis_des'] = str.lower(match.group(1))
 
     # Image shape
     match = re.search('INPUT SHAPE\s*=\s*\((.*)\).*', data)
@@ -426,5 +466,38 @@ def read_case_logfile(log_filepath):
                 casedata.training_parameters['activation'] = str.lower(matches[0])
             else:
                 casedata.training_parameters['activation'] = [str.lower(item) for item in matches]
+
+    ############################################### Design parameters ##################################################
+    # Design parameters (training)
+    match = re.search('DESIGN PARAMETERS TRAIN\s*=\s*\[((\'\w+\')\s*(,?\s*\'\w+\',?)*)\]\s*.*',data)
+    if match:
+        matches = re.findall('(\w+)',match.group(1))
+        if matches:
+            if len(matches) == 1:
+                casedata.design_parameters_train['parameters'] = str.lower(matches[0])
+            else:
+                casedata.design_parameters_train['parameters'] = [str.lower(item) for item in matches]
+
+    # DZDX controlpoints (training)
+    match = re.search('XDZDX CONTROLPOINTS TRAIN\s*=\s*\[(.*)\]', data)
+    if match:
+        matches = re.findall('(\d+\.?\d*)',match.group(1))
+        if matches:
+            casedata.design_parameters_train['xdzdx_cp'] = float(matches[0]) if len(matches) == 1 else [float(item) for item in matches]
+        else:
+            casedata.design_parameters_train['xdzdx_cp'] = None
+
+    # Design parameters standardisation (training)
+    casedata.design_parameters_train_std = dict.fromkeys(casedata.design_parameters_train['parameters'])
+    if casedata.design_parameters_train['xdzdx_cp'] != None:
+        if 'dzdx_c' in casedata.design_parameters_train_std:
+            del casedata.design_parameters_train_std['dzdx_c']
+            casedata.design_parameters_train_std['xdzdx'] = ('camber',casedata.design_parameters_train['xdzdx_cp'])
+        elif 'dzdx_t' in casedata.design_parameters_train_std:
+            del casedata.design_parameters_train_std['dzdx_t']
+            casedata.design_parameters_train_std['xdzdx'] = ('thickness',casedata.design_parameters_train['xdzdx_cp'])
+    casedata.design_parameters_train = casedata.design_parameters_train_std
+    del casedata.design_parameters_train_std
+
 
     return casedata

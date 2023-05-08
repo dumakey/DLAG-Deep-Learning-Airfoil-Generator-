@@ -21,12 +21,17 @@ class AirfoilScanner():
 	def __init__(self,coordinates_filepath,parameters):
 		self.filepath = coordinates_filepath
 		self.parameter_function_launcher = {
-				'leradius':self.set_LEradius,
-				'teangle':self.set_TEangle,
-				'tmax':self.set_relative_thickness,
+				'leradius':self.set_leradius,
+				'teangle':self.set_teangle,
+				'tmax':self.set_tmax,
+				'xtmax':self.set_xtmax,
 				'zmax':self.set_zmax,
+				'xzmax':self.set_xzmax,
 				'zmin':self.set_zmin,
-				'dzdx':self.set_curvature_controlpoints,
+				'xzmin':self.set_xzmin,
+				'zle':self.set_zle,
+				'zte':self.set_zte,
+				'xdzdx':self.set_slope_controlpoints,
 				}
 		self.parameters = parameters
 		'''
@@ -161,7 +166,7 @@ class AirfoilScanner():
 
 		return xu, zu, xl, zl, x, zc, zt, name
 
-	def set_LEradius(self, args):
+	def set_leradius(self, args):
 
 		xu, zu, xl, zl = args
 		# Define limit x-coordinate
@@ -197,7 +202,7 @@ class AirfoilScanner():
 
 		self.design_parameters['leradius'] = r_bar[0]
 
-	def set_TEangle(self, args):
+	def set_teangle(self, args):
 
 		xu, zu, xl, zl = args
 
@@ -217,16 +222,38 @@ class AirfoilScanner():
 		xu, zu = args
 
 		self.design_parameters['zmax'] = max(zu)
-		self.design_parameters['xzmax'] = xu[np.where(zu == self.design_parameters['zmax'])][0]
+
+	def set_xzmax(self, args):
+
+		xu, zu = args
+
+		self.design_parameters['xzmax'] = xu[np.where(zu == max(zu))][0]
 
 	def set_zmin(self, args):
 
 		xl, zl = args
 
 		self.design_parameters['zmin'] = min(zl)
-		self.design_parameters['xzmin'] = xl[np.where(zl == self.design_parameters['zmin'])][0]
+	
+	def set_xzmin(self, args):
 
-	def set_curvature_controlpoints(self, args):
+		xl, zl = args
+
+		self.design_parameters['xzmin'] = xl[np.where(zl == min(zl))][0]
+
+	def set_zle(self, args):
+
+		_, z = args
+
+		self.design_parameters['zle'] = z[0]
+
+	def set_zte(self, args):
+
+		_, z = args
+
+		self.design_parameters['zte'] = z[-1]
+
+	def set_slope_controlpoints(self, args):
 
 		feature = args[0]
 		if feature == 'camber':
@@ -244,7 +271,7 @@ class AirfoilScanner():
 		x = x[idx]
 		dydx = dydx[idx]
 
-		xc = args[1]
+		xc = args[1]  # set of controlpoints
 		dzdx =  self.interp1d(x,dydx,xc,'linear')
 
 		ii = 1
@@ -253,7 +280,25 @@ class AirfoilScanner():
 				self.design_parameters['dzdx_%s_%s'%(feature,ii)] = item
 				ii += 1
 
-	def set_relative_thickness(self, args):
+	def set_tmax(self, args):
+
+		xu, zu, xl, zl = args
+
+		# Define interpolation range
+		x = np.linspace(xu[0],xu[-1],xu.size)
+
+		# Interpolate upper side
+		zupper = self.interp1d(xu,zu,x,'linear')
+		# Interpolate lower side
+		zlower = self.interp1d(xl,zl,x,'linear')
+
+		dz = zupper-zlower
+		tmax = max(dz)
+		c = max(xu) - min(xu)
+
+		self.design_parameters['tmax'] = round(tmax/c,3)
+
+	def set_xtmax(self, args):
 
 		xu, zu, xl, zl = args
 
@@ -270,7 +315,6 @@ class AirfoilScanner():
 		c = max(xu) - min(xu)
 
 		self.design_parameters['xtmax'] = x[np.where(dz == tmax)[0][0]]
-		self.design_parameters['tmax'] = round(tmax/c,3)
 
 	def set_parameters(self):
 
@@ -282,13 +326,23 @@ class AirfoilScanner():
 				fun_args = (self.xup[1], self.zup[1], self.xlow[1], self.zlow[1])
 			elif parameterID == 'tmax':
 				fun_args = (self.xup[1], self.zup[1], self.xlow[1], self.zlow[1])
+			elif parameterID == 'xtmax':
+				fun_args = (self.xup[1], self.zup[1], self.xlow[1], self.zlow[1])
 			elif parameterID == 'zmax':
+				fun_args = (self.xup[1], self.zup[1])
+			elif parameterID == 'xzmax':
 				fun_args = (self.xup[1], self.zup[1])
 			elif parameterID == 'zmin':
 				fun_args = (self.xlow[1], self.zlow[1])
-			elif parameterID == 'dzdx':
-				controlpoints = self.parameters['dzdx']
-				fun_args = (controlpoints)
+			elif parameterID == 'xzmin':
+				fun_args = (self.xlow[1], self.zlow[1])
+			elif parameterID == 'zle':
+				fun_args = (self.xlow[1],self.zlow[1])
+			elif parameterID == 'zte':
+				fun_args = (self.xlow[1],self.zlow[1])
+			elif parameterID == 'xdzdx':
+				controlpoints = self.parameters['xdzdx']
+				fun_args = (controlpoints)			
 
 			self.parameter_function_launcher[parameterID](fun_args)
 
@@ -306,9 +360,6 @@ class AirfoilScanner():
 		z_div_g = np.multiply(g_inv[ii:-ii], z[ii:-ii].reshape(g_inv.size - 2 * ii, 1))
 		P = functions.shape_functions()(x,m)
 		D = np.linalg.pinv(P[:, ii:-ii].T)
-		# aeqv = np.reshape(D * z_div_g,(m + 1,))
-		# zest = np.multiply(1/g_inv,P.T * aeqv.T)
-		# a = np.reshape(D * z_div_g,(m + 1,))
 		a = np.array(D * z_div_g)
 
 		return a
@@ -335,24 +386,27 @@ class AirfoilScanner():
 
 		return np.squeeze(np.array(np.multiply(g, P.T * a)))
 
-def get_aerodata(parameters, case_folder, airfoil_analysis, add_geometry=False, fmt='dat'):
+def get_aerodata(parameters, case_folder, airfoil_analysis, mode='train', add_geometry=False, fmt='dat'):
 
-	plots_folder = os.path.join(case_folder,'Datasets','geometry','originals')
-	if airfoil_analysis == 'camber':
-		airfoil_fpaths = [os.path.join(plots_folder,file) for file in os.listdir(plots_folder)
-						  if file.endswith(fmt) if not file.endswith('_s%s' % fmt)]
-	elif airfoil_analysis == 'thickness':
-		airfoil_fpaths = [os.path.join(plots_folder,file) for file in os.listdir(plots_folder) if file.endswith(fmt)]
+	if mode == 'train':
+		plots_folder = os.path.join(case_folder,'Datasets','geometry','originals')
+		if airfoil_analysis == 'camber':
+			airfoil_fpaths = [os.path.join(plots_folder,file) for file in os.listdir(plots_folder)
+							  if file.endswith(fmt) if not file.endswith('_s%s' % fmt)]
+		elif airfoil_analysis == 'thickness':
+			airfoil_fpaths = [os.path.join(plots_folder,file) for file in os.listdir(plots_folder) if file.endswith(fmt)]
 
-	airfoil_data = dict()
-	for fpath in airfoil_fpaths:
-		airfoil_scanner = AirfoilScanner(fpath,parameters)
-		xu, zu, xl, zl, x, zc, zt, name = airfoil_scanner.get_geometry()
-		airfoil_scanner.set_parameters()
-		airfoil_data[name] = {}
-		if add_geometry == True:
-			airfoil_data[name] = {'x':x,'zc':zc,'zt':zt,'xu':xu,'zu':zu,'xl':xl,'zl':zl}
-		airfoil_data[name].update(airfoil_scanner.design_parameters)
+		airfoil_data = dict()
+		for fpath in airfoil_fpaths:
+			airfoil_scanner = AirfoilScanner(fpath,parameters)
+			xu, zu, xl, zl, x, zc, zt, name = airfoil_scanner.get_geometry()
+			airfoil_scanner.set_parameters()
+			airfoil_data[name] = {}
+			if add_geometry == True:
+				airfoil_data[name] = {'x':x,'zc':zc,'zt':zt,'xu':xu,'zu':zu,'xl':xl,'zl':zl}
+			airfoil_data[name].update(airfoil_scanner.design_parameters)
+	elif 'design':
+		airfoil_data = {'design': dict.fromkeys(parameters)}
 
 	return airfoil_data
 

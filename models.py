@@ -219,7 +219,7 @@ def VAEC(input_dim, n_dpar, latent_dim, encoder_hidden_layers, decoder_hidden_la
         x_decoded = d(tf.keras.layers.concatenate([t,des_vec]))
 
         # Declare inputs/outputs for the model
-        input = x
+        input = [x,des_vec]
         output = x_decoded
     elif mode == 'sample':
         # Decoder
