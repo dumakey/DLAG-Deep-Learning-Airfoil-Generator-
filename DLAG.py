@@ -11,6 +11,7 @@ import cv2 as cv
 from random import randint
 
 import tensorflow as tf
+from sklearn.preprocessing import QuantileTransformer
 from tensorflow.python.framework.ops import disable_eager_execution, enable_eager_execution
 disable_eager_execution()
 
@@ -86,7 +87,7 @@ class CGenTrainer:
                         'generate': self.airfoil_generation,
                         'datagen': self.data_generation,
                         'plotdata': self.plot_data,
-                        'plotactivations': self.plot_activations,
+                        'contourairfoil':self.contour_airfoil,
                         }
 
         analysis_list[analysis_ID]()
@@ -100,11 +101,15 @@ class CGenTrainer:
         training_size = self.parameters.training_parameters['train_size']
         batch_size = self.parameters.training_parameters['batch_size']
         img_size = self.parameters.img_size
+        design_parameters_train = self.parameters.design_parameters_train
+        airfoil_analysis = self.parameters.analysis['airfoil_analysis']
 
-        self.datasets.data_train, self.datasets.data_cv, self.datasets.data_test = \
-        dataset_processing.get_datasets(case_dir,training_size,img_size)
-        self.datasets.dataset_train, self.datasets.dataset_cv, self.datasets.dataset_test = \
-        dataset_processing.get_tensorflow_datasets(self.datasets.data_train,self.datasets.data_cv,self.datasets.data_test,batch_size)
+        # Read dataset
+        self.datasets.samples_train, self.datasets.data_train, self.datasets.b_train, \
+        self.datasets.samples_cv, self.datasets.data_cv, self.datasets.b_cv, \
+        self.datasets.samples_test, self.datasets.data_test, self.datasets.b_test = \
+        dataset_processing.get_datasets(case_dir,design_parameters_train,training_size,img_size,airfoil_analysis)
+
         if self.model.imported == False:
             self.train_model(sens_variable)
         self.export_model_performance(sens_variable)
@@ -119,14 +124,14 @@ class CGenTrainer:
         img_size = self.parameters.img_size
         design_parameters_train = self.parameters.design_parameters_train
         airfoil_analysis = self.parameters.analysis['airfoil_analysis']
-        cond_analysis = self.parameters.analysis['conditional']
 
         # Read dataset
         self.datasets.samples_train, self.datasets.data_train, self.datasets.b_train, \
         self.datasets.samples_cv, self.datasets.data_cv, self.datasets.b_cv, \
         self.datasets.samples_test, self.datasets.data_test, self.datasets.b_test = \
-        dataset_processing.get_datasets(case_dir,design_parameters_train,training_size,img_size,cond_analysis,airfoil_analysis)
-        
+        dataset_processing.get_datasets(case_dir,design_parameters_train,training_size,img_size,airfoil_analysis)
+
+        # Convert datasets to tensorflow format
         self.datasets.dataset_train, self.datasets.dataset_cv, self.datasets.dataset_test = \
         dataset_processing.get_tensorflow_datasets((self.datasets.data_train,self.datasets.b_train),
                                                    (self.datasets.data_cv,self.datasets.b_cv),
@@ -148,13 +153,12 @@ class CGenTrainer:
         img_size = self.parameters.img_size
         design_parameters = self.parameters.design_parameters
         airfoil_analysis = self.parameters.analysis['airfoil_analysis']
-        cond_analysis = self.parameters.analysis['conditional']
 
         # Read dataset
         self.datasets.samples_train, self.datasets.data_train, self.datasets.b_train, \
         self.datasets.samples_cv, self.datasets.data_cv, self.datasets.b_cv, \
         self.datasets.samples_test, self.datasets.data_test, self.datasets.b_test = \
-        dataset_processing.get_datasets(case_dir,design_parameters,training_size,img_size,cond_analysis,airfoil_analysis)
+        dataset_processing.get_datasets(case_dir,design_parameters,training_size,img_size,airfoil_analysis)
 
         self.datasets.dataset_train, self.datasets.dataset_cv, self.datasets.dataset_test = \
         dataset_processing.get_tensorflow_datasets(self.datasets.data_train, self.datasets.data_cv,
@@ -194,8 +198,8 @@ class CGenTrainer:
         if bcheck != {True}: # if not all design parameters are included in the (design) parameters used for training
             self.parameters.design_parameters_des = OrderedDict(casedata.design_parameters_train)
             # delete the parameter corresponding to the specification of the slope controlpoints x-loc
-            if 'xdzdx' in self.parameters.design_parameters_des:
-                del self.parameters.design_parameters_des['xdzdx']
+            if 'dzdx' in self.parameters.design_parameters_des:
+                del self.parameters.design_parameters_des['dzdx']
             # Assign the specified design parameters to the "available" training design parameters
             for parameter, value in design_parameters_on_launch.items():
                 if parameter in self.parameters.design_parameters_des.keys():
@@ -212,8 +216,10 @@ class CGenTrainer:
         if dzdx_cp:
             if 'dzdx_c' in design_parameters_on_launch.keys():
                 self.parameters.design_parameters_des['dzdx'] = ('camber',design_parameters_on_launch['dzdx_c'])
+                del self.parameters.design_parameters_des['dzdx_c']
             elif 'dzdx_t' in design_parameters_on_launch.keys():
                 self.parameters.design_parameters_des['dzdx'] = ('thickness',design_parameters_on_launch['dzdx_t'])
+                del self.parameters.design_parameters_des['dzdx_t']
         casedata.design_parameters_des = self.parameters.design_parameters_des.copy()
 
         # Read parameters
@@ -225,18 +231,25 @@ class CGenTrainer:
         if self.model.imported == False:
             self.singletraining()
 
-        '''
         if not hasattr(self, 'data_train'):
-            samples_train, data_train, b_train, samples_cv, data_cv, b_cv, samples_test, data_test, b_cv = \
-                dataset_processing.get_datasets(case_dir,self.parameters.design_parameters_des,training_size,img_size)
+            samples_train, data_train, b_train, samples_cv, data_cv, b_cv, samples_test, data_test, b_test = \
+                dataset_processing.get_datasets(case_dir,self.parameters.design_parameters_train,training_size,img_size)
             for model in self.model.Model:
-                postprocessing.plot_dataset_samples(data_train,model.predict,n_samples,img_size,storage_dir,stage='Train')
-                postprocessing.plot_dataset_samples(data_cv,model.predict,n_samples,img_size,storage_dir,stage='Cross-validation')
-                postprocessing.plot_dataset_samples(data_test,model.predict,n_samples,img_size,storage_dir,stage='Test')
-        '''
+                postprocessing.plot_dataset_samples(data_train,b_train,model.predict,n_samples,img_size,storage_dir,stage='Train')
+                postprocessing.plot_dataset_samples(data_cv,b_cv,model.predict,n_samples,img_size,storage_dir,stage='Cross-validation')
+                postprocessing.plot_dataset_samples(data_test,b_test,model.predict,n_samples,img_size,storage_dir,stage='Test')
+
         ## GENERATE NEW DATA - SAMPLING ##
         X_samples = self.generate_samples(casedata)
         postprocessing.plot_generated_samples(X_samples,img_size,storage_dir)
+
+    def contour_airfoil(self):
+
+        storage_dir = os.path.join(self.case_dir,'Results','Airfoil_contours')
+        if os.path.exists(storage_dir):
+            rmtree(storage_dir)
+        os.makedirs(storage_dir)
+
 
     def airfoil_reconstruction(self, plot_full_airfoil=False):
 
@@ -331,58 +344,14 @@ class CGenTrainer:
         
         dataset_processing.plot_dataset(dataset_folder,airfoil_fpaths,dataset_type='Training')
 
-    def plot_activations(self):
-
-        # Parameters
-        case_dir = self.case_dir
-        img_dims = self.parameters.img_size
-        latent_dim = self.parameters.training_parameters['latent_dim']
-        batch_size = self.parameters.training_parameters['batch_size']
-        training_size = self.parameters.training_parameters['train_size']
-        n = self.parameters.activation_plotting['n_samples']
-        case_ID = self.parameters.analysis['case_ID']
-        figs_per_row = self.parameters.activation_plotting['n_cols']
-        rows_to_cols_ratio = self.parameters.activation_plotting['rows2cols_ratio']
-
-        # Generate datasets
-        self.datasets.data_train, self.datasets.data_cv, self.datasets.data_test = \
-            dataset_processing.get_datasets(case_dir,training_size,img_dims)
-        self.datasets.dataset_train, self.datasets.dataset_cv, self.datasets.dataset_test = \
-        dataset_processing.get_tensorflow_datasets(self.datasets.data_train,self.datasets.data_cv,self.datasets.data_test,batch_size)
-
-        m_tr = self.datasets.data_train[0].shape[0]
-        m_cv = self.datasets.data_cv[0].shape[0]
-        m_ts = self.datasets.data_test[0].shape[0]
-        m = m_tr + m_cv + m_ts
-
-        # Read datasets
-        dataset = np.zeros((m,np.prod(img_dims)),dtype='uint8')
-        dataset[:m_tr,:] = self.datasets.data_train[0]
-        dataset[m_tr:m_tr+m_cv,:] = self.datasets.data_cv[0]
-        dataset[m_tr+m_cv:m,:] = self.datasets.data_test[0]
-
-        # Index image sampling
-        idx = [randint(1,m) for i in range(n)]
-        idx_set = set(idx)
-        while len(idx) != len(idx_set):
-            extra_item = randint(1,m)
-            idx_set.add(extra_item)
-
-        # Reconstruct encoder model
-        encoder = self.reconstruct_encoder_CNN()
-
-        # Plot
-        for idx in idx_set:
-            img = dataset[idx,:]
-            postprocessing.monitor_hidden_layers(img,encoder,case_dir,figs_per_row,rows_to_cols_ratio,idx)
-        
     def generate_augmented_data(self, transformations, augmented_dataset_size=1):
 
         # Set storage folder for augmented dataset
-        augmented_dataset_dir = os.path.join(self.case_dir,'Datasets','Augmented')
+        augmented_dataset_dir = os.path.join(self.case_dir,'Datasets','plots','Augmented')
 
         # Unpack data
-        X = dataset_processing.read_dataset(case_folder=self.case_dir,dataset_folder='To_augment')
+        _, X = dataset_processing.read_dataset(case_folder=self.case_dir,airfoil_analysis=None,dataset_folder='To_augment')
+
         # Generate new dataset
         data_augmenter = dataset_augmentation.datasetAugmentationClass(X,transformations,augmented_dataset_size,augmented_dataset_dir)
         data_augmenter.transform_images()
@@ -392,7 +361,10 @@ class CGenTrainer:
 
         # Parameters
         input_dim = self.parameters.img_size
-        n_dest = len(self.parameters.design_parameters_train.keys()) + len(self.parameters.design_parameters_train['xdzdx'][1]) - 1
+        if 'xdzdx' in self.parameters.design_parameters_train.keys():
+            n_dest = len(self.parameters.design_parameters_train.keys()) + len(self.parameters.design_parameters_train['xdzdx'][1]) - 1
+        else:
+            n_dest = len(self.parameters.design_parameters_train.keys())
         latent_dim = self.parameters.training_parameters['latent_dim']
         enc_hidden_layers = self.parameters.training_parameters['enc_hidden_layers']
         dec_hidden_layers = self.parameters.training_parameters['dec_hidden_layers']
@@ -410,10 +382,12 @@ class CGenTrainer:
         if sens_var == None:  # If it is a one-time training
             self.model.Model.append(Model(input_dim,n_dest,latent_dim,enc_hidden_layers,dec_hidden_layers,alpha,l2_reg,
                                                l1_reg,dropout,activation,mode='train'))
+
             self.model.History.append(self.model.Model[-1].fit(x=[self.datasets.data_train,self.datasets.b_train],
-                                                               y=self.datasets.data_train,batch_size=batch_size,epochs=nepoch,steps_per_epoch=200,
+                                                               y=self.datasets.data_train,batch_size=batch_size,epochs=nepoch,
                                                                validation_data=([self.datasets.data_cv,self.datasets.b_cv],
-                                                               self.datasets.data_cv),validation_steps=None,verbose=1))
+                                                               self.datasets.data_cv),steps_per_epoch=200,validation_steps=None,verbose=1))
+
         else: # If it is a sensitivity analysis
             if type(alpha) == list:
                 for learning_rate in alpha:
@@ -421,74 +395,94 @@ class CGenTrainer:
                         model = Model(input_dim,n_dest,latent_dim,enc_hidden_layers,dec_hidden_layers,learning_rate,
                                            l2_reg,l1_reg,dropout,activation,mode='train')
                     self.model.Model.append(model)
-                    self.model.History.append(model.fit(self.datasets.dataset_train,epochs=nepoch,steps_per_epoch=200,
-                                                        validation_data=self.datasets.dataset_cv,validation_steps=None,
-                                                        verbose=1))
+                    self.model.History.append(model.fit(x=[self.datasets.data_train,self.datasets.b_train],
+                                                        y=self.datasets.data_train,batch_size=batch_size,epochs=nepoch,
+                                                        steps_per_epoch=200,validation_steps=None,verbose=1,
+                                                        validation_data=([self.datasets.data_cv,self.datasets.b_cv],
+                                                        self.datasets.data_cv)))
             elif type(l2_reg) == list:
                 for regularizer in l2_reg:
                     if self.model.imported == False:
                         model = Model(input_dim,n_dest,latent_dim,enc_hidden_layers,dec_hidden_layers,alpha,regularizer,
                                            l1_reg,dropout,activation,mode='train')
                     self.model.Model.append(model)
-                    self.model.History.append(model.fit(self.datasets.dataset_train,epochs=nepoch,steps_per_epoch=200,
-                                                        validation_data=self.datasets.dataset_cv,validation_steps=None,
-                                                        verbose=1))
+                    self.model.History.append(model.fit(x=[self.datasets.data_train,self.datasets.b_train],
+                                                        y=self.datasets.data_train,batch_size=batch_size,epochs=nepoch,
+                                                        steps_per_epoch=200,validation_steps=None,verbose=1,
+                                                        validation_data=([self.datasets.data_cv,self.datasets.b_cv],
+                                                        self.datasets.data_cv)))
             elif type(l1_reg) == list:
                 for regularizer in l1_reg:
                     if self.model.imported == False:
                         model = Model(input_dim,n_dest,latent_dim,enc_hidden_layers,dec_hidden_layers,alpha,l2_reg,
                                            regularizer,dropout,activation,mode='train')
                     self.model.Model.append(model)
-                    self.model.History.append(model.fit(self.datasets.dataset_train,epochs=nepoch,steps_per_epoch=200,
-                                                        validation_data=self.datasets.dataset_cv,validation_steps=None,
-                                                        verbose=1))
+                    self.model.History.append(model.fit(x=[self.datasets.data_train,self.datasets.b_train],
+                                                        y=self.datasets.data_train,batch_size=batch_size,epochs=nepoch,
+                                                        steps_per_epoch=200,validation_steps=None,verbose=1,
+                                                        validation_data=([self.datasets.data_cv,self.datasets.b_cv],
+                                                        self.datasets.data_cv)))
             elif type(dropout) == list:
                 for rate in dropout:
                     if self.model.imported == False:
                         model = Model(input_dim,n_dest,latent_dim,enc_hidden_layers,dec_hidden_layers,alpha,l2_reg,
                                            l1_reg,rate,activation,mode='train')
                     self.model.Model.append(model)
-                    self.model.History.append(model.fit(self.datasets.dataset_train,epochs=nepoch,steps_per_epoch=200,
-                                                        validation_data=self.datasets.dataset_cv,validation_steps=None,
-                                                        verbose=1))
+                    self.model.History.append(model.fit(x=[self.datasets.data_train,self.datasets.b_train],
+                                                        y=self.datasets.data_train,batch_size=batch_size,epochs=nepoch,
+                                                        steps_per_epoch=200,validation_steps=None,verbose=1,
+                                                        validation_data=([self.datasets.data_cv,self.datasets.b_cv],
+                                                        self.datasets.data_cv)))
             elif type(activation) == list:
                 for act in activation:
                     if self.model.imported == False:
                         model = Model(input_dim,n_dest,latent_dim,enc_hidden_layers,dec_hidden_layers,alpha,l2_reg,
                                            l1_reg,dropout,act,mode='train')
                     self.model.Model.append(model)
-                    self.model.History.append(model.fit(self.datasets.dataset_train,epochs=nepoch,steps_per_epoch=200,
-                                                        validation_data=self.datasets.dataset_cv,validation_steps=None,
-                                                        verbose=1))
+                    self.model.History.append(model.fit(x=[self.datasets.data_train,self.datasets.b_train],
+                                                        y=self.datasets.data_train,batch_size=batch_size,epochs=nepoch,
+                                                        steps_per_epoch=200,validation_steps=None,verbose=1,
+                                                        validation_data=([self.datasets.data_cv,self.datasets.b_cv],
+                                                        self.datasets.data_cv)))
             elif type(latent_dim) == list:
                 for dim in latent_dim:
                     if self.model.imported == False:
                         model = Model(input_dim,n_dest,dim,enc_hidden_layers,dec_hidden_layers,alpha,l2_reg,l1_reg,dropout,
                                            activation,mode='train')
                     self.model.Model.append(model)
-                    self.model.History.append(model.fit(self.datasets.dataset_train,epochs=nepoch,steps_per_epoch=200,
-                                                        validation_data=self.datasets.dataset_cv,validation_steps=None,
-                                                        verbose=1))
+                    self.model.History.append(model.fit(x=[self.datasets.data_train,self.datasets.b_train],
+                                                        y=self.datasets.data_train,batch_size=batch_size,epochs=nepoch,
+                                                        verbose=1,steps_per_epoch=200,
+                                                        validation_data=([self.datasets.data_cv,self.datasets.b_cv],
+                                                        self.datasets.data_cv)))
 
     def generate_samples(self, parameters):
 
-        def build_design_vector(design_parameters):
+        def build_design_vector(parameters, case_folder):
 
-            n_dpar = len(design_parameters.keys()) - 1 + len(design_parameters['dzdx'][-1])
-            vector = np.zeros((n_dpar,))
+            if 'dzdx' in parameters.design_parameters_des.keys():
+                n_dpar = len(parameters.design_parameters_des.keys()) - 1 + len(parameters.design_parameters_des['dzdx'][-1])
+            else:
+                n_dpar = len(parameters.design_parameters_des.keys())
+            b = np.zeros((n_dpar,))
             i = 0
-            for parameter, value in design_parameters.items():
+            for parameter, value in parameters.design_parameters_des.items():
                 if parameter != 'dzdx':
-                    vector[i] = value
+                    b[i] = value
                     i += 1
                 else:
                     for dzdx in value[1]:
-                        vector[i] = dzdx
+                        b[i] = dzdx
                         i += 1
 
-            vector_tf = tf.convert_to_tensor(vector)
+            # Normalize vector
+            if 'dzdx' in parameters.design_parameters_des.keys():
+                airfoil_analysis = parameters.design_parameters_des['dzdx'][0]
+            _, b_tr, _ = dataset_processing.get_design_data(parameters.design_parameters_train,airfoil_analysis,case_folder)
+            scaler = QuantileTransformer().fit(b_tr)  # the data is fit to the whole amount of samples (this can affect training)
+            b_norm = scaler.transform(np.expand_dims(b,axis=0))
 
-            return tf.reshape(vector_tf,(1,n_dpar))
+            return tf.convert_to_tensor(b_norm)
 
         ## BUILD DECODER ##
         output_dim = parameters.img_size
@@ -499,10 +493,14 @@ class CGenTrainer:
         training_size = parameters.training_parameters['train_size']
         batch_size = parameters.training_parameters['batch_size']
         n_samples = self.parameters.samples_generation['n_samples']
-        n_dpar = len(parameters.design_parameters_des.keys()) - 1 + len(parameters.design_parameters_des['dzdx'][-1])
+        if 'dzdx' in parameters.design_parameters_des.keys():
+            n_dpar = len(parameters.design_parameters_des.keys()) - 1 + len(parameters.design_parameters_des['dzdx'][-1])
+        else:
+            n_dpar = len(parameters.design_parameters_des.keys())
 
         decoder = models.VAEC(output_dim,n_dpar,latent_dim,[],dec_hidden_layers,alpha,0.0,0.0,0.0,activation,'sample')  # No regularization
-        
+
+        # Generate new samples
         X_samples = []
         for model in self.model.Model:
             # Retrieve decoder weights
@@ -521,45 +519,11 @@ class CGenTrainer:
             samples = np.zeros([n_samples,np.prod(output_dim)])
             for i in range(n_samples):
                 t = tf.random.normal(shape=(1,latent_dim))
-                b_des = build_design_vector(parameters.design_parameters_des)
+                b_des = build_design_vector(parameters,self.case_dir)
                 samples[i,:] = decoder.predict([t,b_des],steps=1)
             X_samples.append(samples)
 
         return X_samples
-
-    def generate_conditional_samples(self, parameters, label, cond_vae, latent_dim, decoder_dims, act_fun):
-
-        ## BUILD DECODER ##
-        n_samples, n_labels = label.shape
-        output_dim = cond_vae.input[0].shape[1]
-        decoder = conditional_model(n_labels, output_dim, latent_dim, None, decoder_dims, act_fun, mode='sample')
-        # Retrieve decoder weights
-        model_weights = cond_vae.weights
-        j = 0
-        for weight in model_weights:
-            j_layer_shape = weight.get_shape()[0]
-            if j_layer_shape != (latent_dim + n_labels):
-                j += 1
-            else:
-                break
-        decoder_input_layer_idx = j
-
-        decoder_weights = cond_vae.get_weights()[decoder_input_layer_idx:]
-        decoder.set_weights(decoder_weights)
-
-        ## SAMPLE IMAGES ##
-        t_means_std = tf.zeros((1, latent_dim))
-        t_log_var_std = tf.zeros((1, latent_dim))
-        y_label = tf.convert_to_tensor(label, dtype=np.float32)
-
-        X_cond_samples = np.zeros([n_samples, output_dim])
-        for i in range(n_samples):
-            t = tf.keras.layers.Lambda(sampling)([t_means_std, t_log_var_std])
-            label_oh = tf.reshape(y_label[i], (1, n_labels))
-            X_cond_samples[i,:] = decoder.predict([t, label_oh], steps=1)
-
-        return X_cond_samples
-
 
     def export_model_performance(self, sens_var=None):
 
@@ -725,33 +689,6 @@ class CGenTrainer:
 
         return Model, History
 
-    def reconstruct_encoder_CNN(self):
-
-        img_dim = self.parameters.img_size
-        n_dest = len(self.parameters.design_parameters_train)
-        latent_dim = self.parameters.training_parameters['latent_dim']
-        enc_hidden_layers = self.parameters.training_parameters['enc_hidden_layers']
-        dec_hidden_layers = self.parameters.training_parameters['dec_hidden_layers']
-        activation = self.parameters.training_parameters['activation']
-        architecture = self.parameters.training_parameters['architecture']
-
-        storage_dir = os.path.join(self.case_dir,'Results','pretrained_model')
-
-        if architecture == 'cnn':
-            Encoder = models.encoder_lenet(img_dim,latent_dim,enc_hidden_layers,0.0,0.0,0.0,activation)
-        else:
-            Encoder = models.encoder(np.prod(img_dim),enc_hidden_layers,latent_dim,activation)
-        Encoder.compile(optimizer=tf.keras.optimizers.Adam(),loss=tf.keras.losses.MeanSquaredError())
-
-        # Load weights into new model
-        Model = models.VAE(img_dim,latent_dim,enc_hidden_layers,dec_hidden_layers,0.001,0.0,0.0,0.0,'relu','train',architecture)
-        Model.load_weights(os.path.join(storage_dir,'DLAG_model_weights.h5'))
-        enc_CNN_last_layer_idx = [idx for (idx,weight) in enumerate(Model.weights) if weight.shape[0] == latent_dim][0]
-        encoder_weights = Model.get_weights()[:enc_CNN_last_layer_idx]
-        Encoder.set_weights(encoder_weights)
-
-        return Encoder
-
     def export_nn_log(self):
         def update_log(parameters, model):
             training = OrderedDict()
@@ -777,7 +714,6 @@ class CGenTrainer:
             analysis = OrderedDict()
             analysis['CASE ID'] = parameters.analysis['case_ID']
             analysis['ANALYSIS'] = parameters.analysis['type']
-            analysis['CONDITIONAL ANALYSIS'] = parameters.analysis['conditional']
             analysis['AIRFOIL ANALYSIS'] = parameters.analysis['airfoil_analysis']
             analysis['DESIGN AIRFOIL ANALYSIS'] = parameters.analysis['airfoil_analysis_des']
             analysis['IMPORTED MODEL'] = parameters.analysis['import']

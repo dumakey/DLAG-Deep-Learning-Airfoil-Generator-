@@ -1,3 +1,4 @@
+import math
 import re
 from random import randint
 
@@ -216,7 +217,7 @@ def read_case_setup(launch_filepath):
         if match.group(1) != 'NONE':
             casedata.design_parameters_des['leradius'] = float(match.group(1))
         if match.group(2) != 'NONE':
-            casedata.design_parameters_des['teangle'] = float(match.group(2))
+            casedata.design_parameters_des['teangle'] = math.radians(float(match.group(2)))
         if match.group(3) != 'NONE':
             casedata.design_parameters_des['tmax'] = float(match.group(3))
         if match.group(4) != 'NONE':
@@ -349,11 +350,6 @@ def read_case_logfile(log_filepath):
     match = re.search('ANALYSIS\s*=\s*(\w+).*', data)
     if match:
         casedata.analysis['type'] = str.lower(match.group(1))
-
-    # Conditional analysis
-    match = re.search('CONDITIONAL ANALYSIS\s*=\s*(\d).*', data)
-    if match:
-        casedata.analysis['conditional'] = int(match.group(1))
 
     # Type of airfoil analysis (camber/thickness)
     match = re.search('AIRFOIL ANALYSIS\s*=\s*(\w+).*', data)
@@ -490,11 +486,11 @@ def read_case_logfile(log_filepath):
     # Design parameters standardisation (training)
     casedata.design_parameters_train_std = dict.fromkeys(casedata.design_parameters_train['parameters'])
     if casedata.design_parameters_train['xdzdx_cp'] != None:
-        if 'dzdx_c' in casedata.design_parameters_train_std:
-            del casedata.design_parameters_train_std['dzdx_c']
+        if 'xdzdx_c' in casedata.design_parameters_train_std:
+            del casedata.design_parameters_train_std['xdzdx_c']
             casedata.design_parameters_train_std['xdzdx'] = ('camber',casedata.design_parameters_train['xdzdx_cp'])
-        elif 'dzdx_t' in casedata.design_parameters_train_std:
-            del casedata.design_parameters_train_std['dzdx_t']
+        elif 'xdzdx_t' in casedata.design_parameters_train_std:
+            del casedata.design_parameters_train_std['xdzdx_t']
             casedata.design_parameters_train_std['xdzdx'] = ('thickness',casedata.design_parameters_train['xdzdx_cp'])
     casedata.design_parameters_train = casedata.design_parameters_train_std
     del casedata.design_parameters_train_std

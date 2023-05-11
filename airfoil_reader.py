@@ -390,7 +390,7 @@ def get_aerodata(parameters, case_folder, airfoil_analysis, mode='train', add_ge
 
 	if mode == 'train':
 		plots_folder = os.path.join(case_folder,'Datasets','geometry','originals')
-		if airfoil_analysis == 'camber':
+		if airfoil_analysis == 'camber' or airfoil_analysis == None:
 			airfoil_fpaths = [os.path.join(plots_folder,file) for file in os.listdir(plots_folder)
 							  if file.endswith(fmt) if not file.endswith('_s%s' % fmt)]
 		elif airfoil_analysis == 'thickness':

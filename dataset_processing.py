@@ -44,14 +44,13 @@ def create_dataset_pipeline(dataset, is_train=True, num_threads=8, prefetch_buff
 def get_tensorflow_datasets(data_train,data_cv,data_test,batch_size=32):
 
     # Prepare tensor structures from data (image dataset + design vector data)
-    tensor_dataset_train = create_dataset_pipeline(data_train,is_train=True,batch_size=batch_size)
-    tensor_dataset_cv = create_dataset_pipeline(data_cv,is_train=False,batch_size=1)
-    tensor_dataset_test = preprocess_data(data_test[0],data_test[1])
+    dataset_train = create_dataset_pipeline(data_train,is_train=True,batch_size=batch_size)
+    dataset_cv = create_dataset_pipeline(data_cv,is_train=False,batch_size=1)
+    dataset_test = preprocess_data(data_test[0],data_test[1])
 
     # Prepare datasets
-    dataset_train = [tensor_dataset_train.element_spec[0],tensor_dataset_train.element_spec[1]]
-    dataset_cv = [tensor_dataset_cv.element_spec[0],tensor_dataset_cv.element_spec[1]]
-    dataset_test = [tensor_dataset_test[0],tensor_dataset_test[1]]
+    dataset_train = [dataset_train.element_spec[0],dataset_train.element_spec[1]]
+    dataset_cv = [dataset_cv.element_spec[0],dataset_cv.element_spec[1]]
 
     return dataset_train, dataset_cv, dataset_test
 
@@ -73,14 +72,21 @@ def preprocess_image(img, new_dims):
 
     return imgs_processed
 
-def read_dataset(case_folder, airfoil_analysis, format='png'):
+def read_dataset(case_folder, airfoil_analysis, dataset_folder, format='png'):
 
-    plots_folder = os.path.join(case_folder,'Datasets','plots','Training',airfoil_analysis)
-    if airfoil_analysis == 'camber':
-        airfoil_fpaths = [os.path.join(plots_folder,file) for file in os.listdir(plots_folder)
-                          if not file.endswith('_s%s' %format)]
-    elif airfoil_analysis == 'thickness':
-        airfoil_fpaths = [os.path.join(plots_folder,file) for file in os.listdir(plots_folder)]
+    plots_folder = os.path.join(case_folder,'Datasets','plots',dataset_folder)
+    airfoil_fpaths = []
+    for (root, case_dirs, _) in os.walk(plots_folder):
+        if airfoil_analysis == 'camber' or airfoil_analysis == None:
+            for case_dir in case_dirs:
+                files = [os.path.join(root,case_dir,file) for file in os.listdir(os.path.join(root,case_dir))
+                         if file.endswith(format) if not file.endswith('_s%s' %format)]
+                airfoil_fpaths += files
+        elif airfoil_analysis == 'thickness':
+            for case_dir in case_dirs:
+                files = [os.path.join(root,case_dir,file) for file in os.listdir(os.path.join(root,case_dir))
+                         if file.endswith(format)]
+                airfoil_fpaths += files
 
     airfoil_img = []
     airfoil_name = []
@@ -92,7 +98,7 @@ def read_dataset(case_folder, airfoil_analysis, format='png'):
    
     return airfoil_name, airfoil_img
     
-def plot_dataset(dataset_folder, fpaths, dataset_type='Training'):
+def plot_dataset(dataset_folder, fpaths, dataset_type='Originals'):
     
     plots_folder = os.path.join(dataset_folder,'plots',dataset_type)
     if os.path.exists(plots_folder):
@@ -141,11 +147,26 @@ def get_design_dataset(samples, X, airfoil_data, case_folder):
         b[i,:] = list(airfoil_data[sample].values())
 
     return b
-    
-def get_datasets(case_folder, design_parameters, training_size, img_dims, cond_analysis=True, airfoil_analysis='camber'):
+
+def get_design_data(design_parameters, airfoil_analysis, case_folder):
+
+    # Get design parameters and normalize design matrix
+    aerodata = airfoil_reader.get_aerodata(design_parameters,case_folder,airfoil_analysis,mode='train',add_geometry=False)
+    airfoils = list(aerodata.keys())
+    parameters = list(aerodata[airfoils[0]].keys())
+
+    r = len(aerodata)  # number of total (training + validation) samples
+    s = len(aerodata[airfoils[0]].keys()) # get size of design vector
+    b = np.zeros([r,s],dtype='float64')
+    for j,airfoil in enumerate(aerodata.values()):
+        b[j,:] = list(airfoil.values())
+
+    return airfoils, b, parameters
+
+def get_datasets(case_folder, design_parameters, training_size, img_dims, airfoil_analysis='camber'):
 
     # Read original datasets
-    samples, X = read_dataset(case_folder,airfoil_analysis,format='png')
+    samples, X = read_dataset(case_folder,airfoil_analysis,dataset_folder='Training',format='png')
     # Resize images, if necessary
     X = preprocess_image(X,img_dims)
 
@@ -163,28 +184,19 @@ def get_datasets(case_folder, design_parameters, training_size, img_dims, cond_a
     samples_test_mask = [True if sample in samples_test else False for sample in samples_val]
     X_test = X_val[samples_test_mask]
 
-    # Get design parameters and normalize design matrix
-    aerodata = airfoil_reader.get_aerodata(design_parameters,case_folder,airfoil_analysis,mode='train',add_geometry=False)
-    aerodata_norm = dict.fromkeys(aerodata)
-    r = len(aerodata)  # number of total (training + validation) samples
-    s = len(aerodata[samples[0]].keys()) # get size of design vector
-    b = np.zeros([r,s],dtype='float64')
-    for j,airfoil in enumerate(aerodata.values()):
-        b[j,:] = list(airfoil.values())
+    # Get design data and normalize
+    airfoils, b, parameters_name = get_design_data(design_parameters,airfoil_analysis,case_folder)
     scaler = QuantileTransformer().fit(b)  # the data is fit to the whole amount of samples (this can affect training)
     b_norm = scaler.transform(b)
+
     # Insert normalized parameters to aerodata (normalized) dictionary
-    for j,airfoil in enumerate(aerodata_norm.keys()):
-        aerodata_norm[airfoil] = OrderedDict(zip(aerodata[samples[0]].keys(),b_norm[j,:]))
+    aerodata_norm = dict.fromkeys(airfoils)
+    for j,airfoil in enumerate(airfoils):
+        aerodata_norm[airfoil] = OrderedDict(zip(parameters_name,b_norm[j,:]))
 
     # Get design dataset
-    if cond_analysis == True:
-        b_train = get_design_dataset(samples_train,X_train,aerodata_norm,case_folder)
-        b_cv = get_design_dataset(samples_cv,X_cv,aerodata_norm,case_folder)
-        b_test = get_design_dataset(samples_test,X_test,aerodata_norm,case_folder)
-
-    data_train = X_train
-    data_cv = X_cv
-    data_test = X_test
+    b_train = get_design_dataset(samples_train,X_train,aerodata_norm,case_folder)
+    b_cv = get_design_dataset(samples_cv,X_cv,aerodata_norm,case_folder)
+    b_test = get_design_dataset(samples_test,X_test,aerodata_norm,case_folder)
     
-    return samples_train, data_train, b_train, samples_cv, data_cv, b_cv, samples_test, data_test, b_cv
+    return samples_train, X_train, b_train, samples_cv, X_cv, b_cv, samples_test, X_test, b_cv
