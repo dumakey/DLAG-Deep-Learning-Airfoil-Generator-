@@ -107,8 +107,13 @@ def plot_dataset(dataset_folder, fpaths, dataset_type='Originals'):
     os.makedirs(os.path.join(plots_folder,'thickness'))
     os.makedirs(os.path.join(plots_folder,'upperside'))
     os.makedirs(os.path.join(plots_folder,'lowerside'))
+    os.makedirs(os.path.join(plots_folder,'full_airfoil'))
 
-    line_width = 10
+    ylim_c = (-0.015,0.15)
+    ylim_t = (-0.01,0.3)
+    ylim_u = (-0.05,0.35)
+    ylim_l = (-0.1,0.15)
+    line_width = 6
     for fpath in fpaths:
         airfoil_scanner = airfoil_reader.AirfoilScanner(fpath,{})
         xu, zu, xl, zl, x, zc, zt, name = airfoil_scanner.get_geometry()
@@ -117,28 +122,41 @@ def plot_dataset(dataset_folder, fpaths, dataset_type='Originals'):
             fig, ax = plt.subplots(1)
             ax.plot(x,zc,color='k',linewidth=line_width)
             ax.axis('off')
-            fig.savefig(os.path.join(plots_folder,'camber',name),dpi=200)
+            ax.set_ylim(ylim_c);
+            fig.savefig(os.path.join(plots_folder,'camber',name),dpi=200,bbox_inches='tight',pad_inches=0)
             plt.close()
 
         fig, ax = plt.subplots(1)
         ax.plot(x,zt,color='k',linewidth=line_width)
         ax.axis('off')
-        fig.savefig(os.path.join(plots_folder,'thickness',name), dpi=200)
+        ax.set_ylim(ylim_t);
+        fig.savefig(os.path.join(plots_folder,'thickness',name),dpi=200,bbox_inches='tight',pad_inches=0)
         plt.close()
         
         fig, ax = plt.subplots(1)
         ax.plot(xl,zl,color='k',linewidth=line_width)
         ax.axis('off')
-        fig.savefig(os.path.join(plots_folder,'lowerside',name),dpi=200)
+        ax.set_ylim(ylim_l);
+        fig.savefig(os.path.join(plots_folder,'lowerside',name),dpi=200,bbox_inches='tight',pad_inches=0)
         plt.close()
         
         fig, ax = plt.subplots(1)
         ax.plot(xu,zu,color='k',linewidth=line_width)
         ax.axis('off')
-        fig.savefig(os.path.join(plots_folder,'upperside',name),dpi=200)
+        ax.set_ylim(ylim_u);
+        fig.savefig(os.path.join(plots_folder,'upperside',name),dpi=200,bbox_inches='tight',pad_inches=0)
         plt.close()
 
-def get_design_dataset(samples, X, airfoil_data, case_folder):
+        fig, ax = plt.subplots(1)
+        ax.plot(xu,zu,color='r',linewidth=line_width-2)
+        ax.plot(xl,zl,color='b',linewidth=line_width-2)
+        ax.plot(x,zc,color='g',linestyle='--',linewidth=line_width-5)
+        ax.axis('off')
+        ax.set_ylim((ylim_l[0],ylim_u[1]));
+        fig.savefig(os.path.join(plots_folder,'full_airfoil',name),dpi=200,bbox_inches='tight',pad_inches=0)
+        plt.close()
+
+def get_design_dataset(samples, X, airfoil_data):
 
     r = X.shape[0]  # number of samples and dimension of samples in the dataset provided
     s = len(airfoil_data[samples[0]].values()) # get size of design vector
@@ -148,10 +166,10 @@ def get_design_dataset(samples, X, airfoil_data, case_folder):
 
     return b
 
-def get_design_data(design_parameters, airfoil_analysis, case_folder):
+def get_design_data(design_parameters, airfoil_analysis, geo_folder):
 
     # Get design parameters and normalize design matrix
-    aerodata = airfoil_reader.get_aerodata(design_parameters,case_folder,airfoil_analysis,mode='train',add_geometry=False)
+    aerodata = airfoil_reader.get_aerodata(design_parameters,geo_folder,airfoil_analysis,mode='train',add_geometry=False)
     airfoils = list(aerodata.keys())
     parameters = list(aerodata[airfoils[0]].keys())
 
@@ -185,7 +203,8 @@ def get_datasets(case_folder, design_parameters, training_size, img_dims, airfoi
     X_test = X_val[samples_test_mask]
 
     # Get design data and normalize
-    airfoils, b, parameters_name = get_design_data(design_parameters,airfoil_analysis,case_folder)
+    geo_folder = os.path.join(case_folder,'Datasets','geometry','originals')
+    airfoils, b, parameters_name = get_design_data(design_parameters,airfoil_analysis,geo_folder)
     scaler = QuantileTransformer().fit(b)  # the data is fit to the whole amount of samples (this can affect training)
     b_norm = scaler.transform(b)
 
@@ -195,8 +214,8 @@ def get_datasets(case_folder, design_parameters, training_size, img_dims, airfoi
         aerodata_norm[airfoil] = OrderedDict(zip(parameters_name,b_norm[j,:]))
 
     # Get design dataset
-    b_train = get_design_dataset(samples_train,X_train,aerodata_norm,case_folder)
-    b_cv = get_design_dataset(samples_cv,X_cv,aerodata_norm,case_folder)
-    b_test = get_design_dataset(samples_test,X_test,aerodata_norm,case_folder)
-    
+    b_train = get_design_dataset(samples_train,X_train,aerodata_norm)
+    b_cv = get_design_dataset(samples_cv,X_cv,aerodata_norm)
+    b_test = get_design_dataset(samples_test,X_test,aerodata_norm)
+
     return samples_train, X_train, b_train, samples_cv, X_cv, b_cv, samples_test, X_test, b_cv

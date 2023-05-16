@@ -50,8 +50,8 @@ class AirfoilScanner():
 		xq = []
 		zq = []
 		for i in range(x.__len__()):
-			xq.append(np.concatenate([self.sinspace(x[i][0],0.5,-int(0.75*x[i].size)),
-									  self.sinspace(0.501,x[i][-1],int(0.75*x[i].size))]))
+			xq.append(np.concatenate([self.sinspace(x[i][0],0.5,-int(0.8*x[i].size)),
+									  self.sinspace(0.501,x[i][-1],int(0.5*x[i].size))]))
 			zq.append(self.interp1d(x[i],z[i],xq[-1],'quadratic'))
 
 		return xq, zq
@@ -93,7 +93,7 @@ class AirfoilScanner():
 
 		return xref, zref
 
-	def get_geometry(self):
+	def scan_geometry(self, return_geometry=True):
 
 		name = self.filepath.split(os.sep)[-1].replace('.dat','')
 		#print('Airfoil: ',name)
@@ -163,8 +163,10 @@ class AirfoilScanner():
 		self.x = (name,x)
 		self.zc = (name,zc)
 		self.zt = (name,zt)
+		self.name = name
 
-		return xu, zu, xl, zl, x, zc, zt, name
+		if return_geometry == True:
+			return xu, zu, xl, zl, x, zc, zt
 
 	def set_leradius(self, args):
 
@@ -182,8 +184,8 @@ class AirfoilScanner():
 				break
 
 		# Construct x and z coordinates range
-		x = np.concatenate((np.flipud(xu[0:ic_u]), xl[0:ic_l]))
-		z = np.concatenate((-np.flipud(zu[0:ic_u]), -zl[0:ic_l]))
+		x = np.concatenate((np.flipud(xu[0:ic_u]),xl[0:ic_l]))
+		z = np.concatenate((-np.flipud(zu[0:ic_u]),-zl[0:ic_l]))
 
 		_, idx = np.unique(x, return_index=True)
 		x = x[np.sort(idx)]
@@ -386,25 +388,27 @@ class AirfoilScanner():
 
 		return np.squeeze(np.array(np.multiply(g, P.T * a)))
 
-def get_aerodata(parameters, case_folder, airfoil_analysis, mode='train', add_geometry=False, fmt='dat'):
+def get_aerodata(parameters, geo_folder, airfoil_analysis, mode='train', add_geometry=False, fmt='dat'):
 
 	if mode == 'train':
-		plots_folder = os.path.join(case_folder,'Datasets','geometry','originals')
 		if airfoil_analysis == 'camber' or airfoil_analysis == None:
-			airfoil_fpaths = [os.path.join(plots_folder,file) for file in os.listdir(plots_folder)
+			airfoil_fpaths = [os.path.join(geo_folder,file) for file in os.listdir(geo_folder)
 							  if file.endswith(fmt) if not file.endswith('_s%s' % fmt)]
 		elif airfoil_analysis == 'thickness':
-			airfoil_fpaths = [os.path.join(plots_folder,file) for file in os.listdir(plots_folder) if file.endswith(fmt)]
+			airfoil_fpaths = [os.path.join(geo_folder,file) for file in os.listdir(geo_folder) if file.endswith(fmt)]
 
 		airfoil_data = dict()
 		for fpath in airfoil_fpaths:
 			airfoil_scanner = AirfoilScanner(fpath,parameters)
-			xu, zu, xl, zl, x, zc, zt, name = airfoil_scanner.get_geometry()
+			airfoil_scanner.scan_geometry(return_geometry=False)
 			airfoil_scanner.set_parameters()
-			airfoil_data[name] = {}
+			airfoil_name = airfoil_scanner.name
+			airfoil_data[airfoil_name] = {}
 			if add_geometry == True:
-				airfoil_data[name] = {'x':x,'zc':zc,'zt':zt,'xu':xu,'zu':zu,'xl':xl,'zl':zl}
-			airfoil_data[name].update(airfoil_scanner.design_parameters)
+				airfoil_data[airfoil_name] = {'x':airfoil_scanner.x[1],'zc':airfoil_scanner.zc[1],'zt':airfoil_scanner.zt[1],
+											  'xu':airfoil_scanner.xup[1],'zu':airfoil_scanner.zup[1],'xl':airfoil_scanner.xlow[1],
+											  'zl':airfoil_scanner.zlow[1]}
+			airfoil_data[airfoil_name].update(airfoil_scanner.design_parameters)
 	elif 'design':
 		airfoil_data = {'design': dict.fromkeys(parameters)}
 

@@ -241,3 +241,18 @@ def VAEC(input_dim, n_dpar, latent_dim, encoder_hidden_layers, decoder_hidden_la
                   metrics=[tf.keras.metrics.MeanSquaredError()])
 
     return model
+
+
+def latent_model(latent_dim):
+
+    decoder_latent = tf.keras.Sequential(name='decoder_latent')
+    decoder_latent.add(tf.keras.Input(shape=(latent_dim,)))
+    decoder_latent.add(tf.keras.layers.Dense(latent_dim, activation=None))
+
+    input = tf.keras.Input(shape=(latent_dim,))
+    output = decoder_latent(input)
+    model = tf.keras.Model(input,output)
+    model.compile(optimizer=tf.keras.optimizers.Adam(),loss=tf.keras.losses.MeanAbsoluteError(),
+                  metrics=[tf.keras.metrics.MeanSquaredError()])
+
+    return model

@@ -9,10 +9,11 @@ from collections import OrderedDict
 import pickle
 import cv2 as cv
 from random import randint
+from scipy.interpolate import interpolate
 
 import tensorflow as tf
 from sklearn.preprocessing import QuantileTransformer
-from tensorflow.python.framework.ops import disable_eager_execution, enable_eager_execution
+from tensorflow.python.framework.ops import disable_eager_execution
 disable_eager_execution()
 
 import reader
@@ -87,7 +88,7 @@ class CGenTrainer:
                         'generate': self.airfoil_generation,
                         'datagen': self.data_generation,
                         'plotdata': self.plot_data,
-                        'contourairfoil':self.contour_airfoil,
+                        'scan':self.scan_airfoil,
                         }
 
         analysis_list[analysis_ID]()
@@ -231,25 +232,134 @@ class CGenTrainer:
         if self.model.imported == False:
             self.singletraining()
 
+
         if not hasattr(self, 'data_train'):
             samples_train, data_train, b_train, samples_cv, data_cv, b_cv, samples_test, data_test, b_test = \
                 dataset_processing.get_datasets(case_dir,self.parameters.design_parameters_train,training_size,img_size)
             for model in self.model.Model:
-                postprocessing.plot_dataset_samples(data_train,b_train,model.predict,n_samples,img_size,storage_dir,stage='Train')
-                postprocessing.plot_dataset_samples(data_cv,b_cv,model.predict,n_samples,img_size,storage_dir,stage='Cross-validation')
-                postprocessing.plot_dataset_samples(data_test,b_test,model.predict,n_samples,img_size,storage_dir,stage='Test')
+                postprocessing.plot_dataset_samples(data_train,b_train,samples_train,model.predict,n_samples,img_size,
+                                                    storage_dir,stage='Train')
+                postprocessing.plot_dataset_samples(data_cv,b_cv,samples_cv,model.predict,n_samples,img_size,storage_dir,
+                                                    stage='Cross-validation')
+                postprocessing.plot_dataset_samples(data_test,b_test,samples_test,model.predict,n_samples,img_size,
+                                                    storage_dir,stage='Test')
 
         ## GENERATE NEW DATA - SAMPLING ##
-        X_samples = self.generate_samples(casedata)
+
+        # TODO HAY QUE MODIFICAR LA FUNCION GENERATE SAMPLES PARA QUE EXPORTE A UN ARCHIVO EL VECTOR t, PARA QUE EN EL ANALISIS DE
+        # THICKNESS (DESPUES DE HACER EL DE CAMBER), SE LE INTRODUZCA AL MODELO EL MISMO VECTOR t
+        # POSIBLE INCONSISTENCIA YA QUE EL LATENT SPACE DE CAMBER ES DISTINTO AL DEL DE THICKNESS, A PESAR DE QUE
+        # SE PARTA DE ENUNCIADOS DE DISEÑO IDENTICOS (RESPETAR LOS PARAMETROS DE DISEÑO ESPECIFICADOS)
+
+        X_samples = self.generate_samples(casedata,storage_dir)
         postprocessing.plot_generated_samples(X_samples,img_size,storage_dir)
 
-    def contour_airfoil(self):
+    def scan_airfoil(self):
 
-        storage_dir = os.path.join(self.case_dir,'Results','Airfoil_contours')
+        # Manage folders
+        samples_dir = os.path.join(self.case_dir,'Results','Airfoil_contours')
+        storage_dir = os.path.join(samples_dir,'Airfoils')
         if os.path.exists(storage_dir):
             rmtree(storage_dir)
         os.makedirs(storage_dir)
 
+        # Get design parameters used for training
+        logfile = [file for file in os.listdir(samples_dir) if file.endswith('.log')]
+        try:
+            casedata = reader.read_case_logfile(os.path.join(samples_dir,logfile[0]))
+            design_parameters = casedata.design_parameters_train
+        except:
+            raise Exception('There is no log file in the folder {}. Please make sure to add this file into the folder'
+                            .format(os.path.basename(samples_dir)))
+
+        # Browse in the samples folder
+        samples_fname = [file for file in os.listdir(os.path.join(samples_dir,'camber'))]
+        for sample in samples_fname:
+            # Airfoil name
+            airfoil = sample.replace('.png','')
+
+            # Read airfoil camber contour from image
+            airfoil_camber_img = cv.imread(os.path.join(samples_dir,'camber',sample))
+            airfoil_camber_img = cv.bitwise_not(airfoil_camber_img)
+            gray_img = cv.cvtColor(airfoil_camber_img,code=cv.COLOR_BGR2GRAY)
+            airfoil_camber_blur_img = cv.medianBlur(gray_img,5)
+            #cv.imshow('blur',blur_img)
+            #cv.waitKey(0)
+
+            # Read airfoil thickness contour from image
+            airfoil_thickness_img = cv.imread(os.path.join(samples_dir,'thickness',sample))
+            airfoil_thickness_img = cv.bitwise_not(airfoil_thickness_img)
+            gray_img = cv.cvtColor(airfoil_thickness_img,code=cv.COLOR_BGR2GRAY)
+            airfoil_thickness_blur_img = cv.medianBlur(gray_img, 5)
+            # cv.imshow('blur',blur_img)
+            # cv.waitKey(0)
+
+            # Scan
+            ylim_c = (-0.015, 0.15)
+            ylim_t = (-0.01, 0.3)
+            # Scan mean contour from camber image
+            zc_mean = postprocessing.get_mean_contour(airfoil_camber_blur_img,threshold=200,ylims=ylim_c)
+            xc_mean = np.linspace(0,1,zc_mean.shape[0])
+            # Scan mean contour from thickness image
+            zt_mean = postprocessing.get_mean_contour(airfoil_thickness_blur_img,threshold=200,ylims=ylim_t)
+            xt_mean = np.linspace(0,1,zt_mean.shape[0])
+
+            # Refine camber and thickness curves
+            x_mean = np.linspace(0,1,50)
+            zc_mean = interpolate.interp1d(xc_mean,zc_mean,kind='quadratic')(x_mean)
+            zt_mean = interpolate.interp1d(xt_mean,zt_mean,kind='quadratic')(x_mean)
+
+            # Compute upper and lower sides
+            zu_mean = zc_mean + zt_mean
+            zl_mean = zc_mean - zt_mean
+
+            # Plot and store airfoil
+            #airfoil_scanner = airfoil_reader.AirfoilScanner(os.path.join(self.case_dir,'Datasets','geometry','originals',sample.replace('.png','.dat')),
+            #                                 self.parameters.design_parameters_train)
+            #_, _, _, _, x_or, zc_or, zt_or = airfoil_scanner.scan_geometry()
+            plt.figure()
+            plt.plot(x_mean,zc_mean,label='Mean camber',color='green')
+            plt.plot(x_mean,zt_mean,label='Mean thickness',color='cyan')
+            #plt.plot(x_or,zc_or-ylim_c[0],label='Original camber',color='blue',linestyle='--')
+            #plt.plot(x_or,zt_or-ylim_t[0],label='Original thickness',color='green',linestyle='--')
+            plt.xlabel('x')
+            plt.ylabel('z')
+            plt.legend()
+            plt.savefig(os.path.join(storage_dir,airfoil+'_camber_thickness_airfoil.png'),dpi=200)
+
+            plt.figure()
+            plt.plot(x_mean,zu_mean,label='Mean upperside',color='red')
+            plt.plot(x_mean, zc_mean,label='Mean camber',color='green',linestyle='--')
+            plt.plot(x_mean,zl_mean,label='Mean lowerside',color='blue')
+            plt.xlabel('x')
+            plt.ylabel('z')
+            plt.savefig(os.path.join(storage_dir,airfoil+'_full_airfoil.png'),dpi=200)
+            plt.show(block=True)
+
+            # Write upper, lower data to file (in the appropriate format)
+            geo_airfoil_fname = '{}_airfoil.dat'.format(sample.split('.png')[0])
+            file = open(os.path.join(storage_dir,geo_airfoil_fname),'w')
+            file.write('US\n')
+            for xi,zi in zip(x_mean,zu_mean):
+                file.write('{} {}\n'.format(xi,zi))
+            file.write('LS\n')
+            for xi, zi in zip(x_mean,zl_mean):
+                file.write('{} {}\n'.format(xi,zi))
+            file.close()
+
+            # Read airfoil geometry and extract features
+            airfoil_scanner = airfoil_reader.AirfoilScanner(os.path.join(storage_dir,geo_airfoil_fname),design_parameters)
+            airfoil_scanner.scan_geometry(return_geometry=False)
+            airfoil_scanner.set_parameters()
+
+            # Export data
+            parameters = list(airfoil_scanner.design_parameters.keys())
+            data = list(airfoil_scanner.design_parameters.values())
+            data_df = pd.DataFrame(index=parameters,columns=['Design parameters'],data=data)
+            if 'teangle' in parameters:
+                data_df.loc['teangle'] = 180/np.pi * data_df.loc['teangle']
+            airfoil_data_fname = '{}_airfoil.csv'.format(airfoil)
+            data_df.to_csv(os.path.join(storage_dir,airfoil_data_fname),sep=';',decimal='.')
 
     def airfoil_reconstruction(self, plot_full_airfoil=False):
 
@@ -342,7 +452,7 @@ class CGenTrainer:
                 files = [os.path.join(root,case_dir,file) for file in os.listdir(os.path.join(root,case_dir)) if file.endswith('.dat')]
                 airfoil_fpaths += files
         
-        dataset_processing.plot_dataset(dataset_folder,airfoil_fpaths,dataset_type='Training')
+        dataset_processing.plot_dataset(dataset_folder,airfoil_fpaths,dataset_type='Originals')
 
     def generate_augmented_data(self, transformations, augmented_dataset_size=1):
 
@@ -456,7 +566,7 @@ class CGenTrainer:
                                                         validation_data=([self.datasets.data_cv,self.datasets.b_cv],
                                                         self.datasets.data_cv)))
 
-    def generate_samples(self, parameters):
+    def generate_samples(self, parameters, storage_dir):
 
         def build_design_vector(parameters, case_folder):
 
@@ -500,6 +610,9 @@ class CGenTrainer:
 
         decoder = models.VAEC(output_dim,n_dpar,latent_dim,[],dec_hidden_layers,alpha,0.0,0.0,0.0,activation,'sample')  # No regularization
 
+        # Build fake network to decode latent vector
+        latent_model = models.latent_model(latent_dim)
+
         # Generate new samples
         X_samples = []
         for model in self.model.Model:
@@ -515,13 +628,20 @@ class CGenTrainer:
             decoder_weights = model.get_weights()[decoder_input_layer_idx:]
             decoder.set_weights(decoder_weights)
 
-            ## SAMPLE IMAGES ##
+            ## Sample images ##
+            geometry_folder = os.path.join(self.case_dir,'Datasets','geometry','originals')
             samples = np.zeros([n_samples,np.prod(output_dim)])
+            latent_vectors = np.zeros((latent_dim,n_samples))
             for i in range(n_samples):
                 t = tf.random.normal(shape=(1,latent_dim))
-                b_des = build_design_vector(parameters,self.case_dir)
+                latent_vectors[:,i] = latent_model.predict(t,steps=1)
+                b_des = build_design_vector(parameters,geometry_folder)
                 samples[i,:] = decoder.predict([t,b_des],steps=1)
             X_samples.append(samples)
+
+            ## Export latent vectors
+            latent_df = pd.DataFrame(index=None,columns=np.arange(1,n_samples+1,1),data=latent_vectors)
+            latent_df.to_csv(os.path.join(storage_dir,'Latent_vectors.csv'),sep=';',decimal='.')
 
         return X_samples
 
@@ -671,8 +791,6 @@ class CGenTrainer:
             Model = tf.keras.models.load_model(os.path.join(storage_dir,model_folder),custom_objects={'loss':loss},compile=False)
             Model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=alpha),loss=lambda x, y: loss,
                           metrics=[tf.keras.metrics.MeanSquaredError()])
-
-            tf.config.run_functions_eagerly(False) # Disable eager execution
 
             # Reconstruct history
             class history_container:
