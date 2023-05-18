@@ -10,6 +10,7 @@ import pickle
 import cv2 as cv
 from random import randint
 from scipy.interpolate import interpolate
+from scipy.signal import lfilter
 
 import tensorflow as tf
 from sklearn.preprocessing import QuantileTransformer
@@ -179,7 +180,7 @@ class CGenTrainer:
         self.model.imported = True
         self.airfoil_generation()
     
-    def airfoil_generation(self):
+    def airfoil_generation(self, supply_latent=False):
 
         if self.model.imported == True:
             storage_dir = os.path.join(self.case_dir,'Results','pretrained_model','Airfoil_generation')
@@ -228,10 +229,10 @@ class CGenTrainer:
         n_samples = self.parameters.samples_generation['n_samples']
         training_size = casedata.training_parameters['train_size']
         img_size = casedata.img_size
+        supply_latent = self.parameters.samples_generation['supply_latent']
 
         if self.model.imported == False:
             self.singletraining()
-
 
         if not hasattr(self, 'data_train'):
             samples_train, data_train, b_train, samples_cv, data_cv, b_cv, samples_test, data_test, b_test = \
@@ -245,13 +246,7 @@ class CGenTrainer:
                                                     storage_dir,stage='Test')
 
         ## GENERATE NEW DATA - SAMPLING ##
-
-        # TODO HAY QUE MODIFICAR LA FUNCION GENERATE SAMPLES PARA QUE EXPORTE A UN ARCHIVO EL VECTOR t, PARA QUE EN EL ANALISIS DE
-        # THICKNESS (DESPUES DE HACER EL DE CAMBER), SE LE INTRODUZCA AL MODELO EL MISMO VECTOR t
-        # POSIBLE INCONSISTENCIA YA QUE EL LATENT SPACE DE CAMBER ES DISTINTO AL DEL DE THICKNESS, A PESAR DE QUE
-        # SE PARTA DE ENUNCIADOS DE DISEÑO IDENTICOS (RESPETAR LOS PARAMETROS DE DISEÑO ESPECIFICADOS)
-
-        X_samples = self.generate_samples(casedata,storage_dir)
+        X_samples = self.generate_samples(casedata,storage_dir,supply_latent=supply_latent)
         postprocessing.plot_generated_samples(X_samples,img_size,storage_dir)
 
     def scan_airfoil(self):
@@ -280,7 +275,7 @@ class CGenTrainer:
 
             # Read airfoil camber contour from image
             airfoil_camber_img = cv.imread(os.path.join(samples_dir,'camber',sample))
-            airfoil_camber_img = cv.bitwise_not(airfoil_camber_img)
+            #airfoil_camber_img = cv.bitwise_not(airfoil_camber_img)
             gray_img = cv.cvtColor(airfoil_camber_img,code=cv.COLOR_BGR2GRAY)
             airfoil_camber_blur_img = cv.medianBlur(gray_img,5)
             #cv.imshow('blur',blur_img)
@@ -288,7 +283,7 @@ class CGenTrainer:
 
             # Read airfoil thickness contour from image
             airfoil_thickness_img = cv.imread(os.path.join(samples_dir,'thickness',sample))
-            airfoil_thickness_img = cv.bitwise_not(airfoil_thickness_img)
+            #airfoil_thickness_img = cv.bitwise_not(airfoil_thickness_img)
             gray_img = cv.cvtColor(airfoil_thickness_img,code=cv.COLOR_BGR2GRAY)
             airfoil_thickness_blur_img = cv.medianBlur(gray_img, 5)
             # cv.imshow('blur',blur_img)
@@ -305,9 +300,17 @@ class CGenTrainer:
             xt_mean = np.linspace(0,1,zt_mean.shape[0])
 
             # Refine camber and thickness curves
-            x_mean = np.linspace(0,1,50)
+
+            n = 35  # the larger n is, the smoother curve will be
+            b = [1.0/n] * n
+            a = 1
+            zc_mean = lfilter(b,a,zc_mean)
+            zt_mean = lfilter(b,a,zt_mean)
+            x_mean = np.linspace(0,1,zc_mean.size*3)
             zc_mean = interpolate.interp1d(xc_mean,zc_mean,kind='quadratic')(x_mean)
             zt_mean = interpolate.interp1d(xt_mean,zt_mean,kind='quadratic')(x_mean)
+            zc_mean = lfilter(b,a,zc_mean)
+            zt_mean = lfilter(b,a,zt_mean)
 
             # Compute upper and lower sides
             zu_mean = zc_mean + zt_mean
@@ -334,7 +337,7 @@ class CGenTrainer:
             plt.xlabel('x')
             plt.ylabel('z')
             plt.savefig(os.path.join(storage_dir,airfoil+'_full_airfoil.png'),dpi=200)
-            plt.show(block=True)
+            #plt.show(block=True)
 
             # Write upper, lower data to file (in the appropriate format)
             geo_airfoil_fname = '{}_airfoil.dat'.format(sample.split('.png')[0])
@@ -566,7 +569,7 @@ class CGenTrainer:
                                                         validation_data=([self.datasets.data_cv,self.datasets.b_cv],
                                                         self.datasets.data_cv)))
 
-    def generate_samples(self, parameters, storage_dir):
+    def generate_samples(self, parameters, storage_dir, supply_latent=False):
 
         def build_design_vector(parameters, case_folder):
 
@@ -631,12 +634,21 @@ class CGenTrainer:
             ## Sample images ##
             geometry_folder = os.path.join(self.case_dir,'Datasets','geometry','originals')
             samples = np.zeros([n_samples,np.prod(output_dim)])
-            latent_vectors = np.zeros((latent_dim,n_samples))
-            for i in range(n_samples):
-                t = tf.random.normal(shape=(1,latent_dim))
-                latent_vectors[:,i] = latent_model.predict(t,steps=1)
-                b_des = build_design_vector(parameters,geometry_folder)
-                samples[i,:] = decoder.predict([t,b_des],steps=1)
+            if supply_latent == True:
+                latent_vectors_file = [file for file in os.listdir(os.path.dirname(storage_dir)) if file.startswith('Latent_vectors')]
+                latent_vectors = pd.read_csv(os.path.join(os.path.dirname(storage_dir),latent_vectors_file[0]),delimiter=';')
+                latent_vectors = latent_vectors.iloc[:,1:]
+                for i in range(n_samples):
+                    t = tf.reshape(tf.convert_to_tensor(latent_vectors.iloc[:,i]),(1,latent_dim))
+                    b_des = build_design_vector(parameters,geometry_folder)
+                    samples[i,:] = decoder.predict([t,b_des],steps=1)
+            else:
+                latent_vectors = np.zeros((latent_dim,n_samples))
+                for i in range(n_samples):
+                    t = tf.random.normal(shape=(1,latent_dim))
+                    latent_vectors[:,i] = latent_model.predict(t,steps=1)
+                    b_des = build_design_vector(parameters,geometry_folder)
+                    samples[i,:] = decoder.predict([t,b_des],steps=1)
             X_samples.append(samples)
 
             ## Export latent vectors

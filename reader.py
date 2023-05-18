@@ -162,6 +162,14 @@ def read_case_setup(launch_filepath):
         else:
             casedata.samples_generation['n_samples'] = int(match.group(1))
 
+    # Boolean to indicate whether to supply or not a set of latent vectors
+    match = re.search('SUPPLYLATENT\s*=\s*(\d|NONE).*', data)
+    if match:
+        if match.group(1) == 'NONE':
+            casedata.samples_generation['supply_latent'] = None
+        else:
+            casedata.samples_generation['supply_latent'] = int(match.group(1))
+
     # Design parameters (training)
     match = re.search('DPARAMETERS_TRAIN\s*=\s*\(\s*LERADIUS\s*\,\s*(\d)\s*\,\s*TEANGLE\s*\,\s*(\d)\s*\,'
                       '\s*TMAX\s*\,\s*(\d)\s*\,\s*ZMAX\s*\,\s*(\d)\s*\,\s*ZMIN\s*\,\s*(\d)\s*\,\s*ZLE\s*\,\s*(\d)\s*\,'
