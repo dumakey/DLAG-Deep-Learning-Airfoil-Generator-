@@ -170,6 +170,10 @@ def read_case_setup(launch_filepath):
         else:
             casedata.samples_generation['supply_latent'] = int(match.group(1))
 
+    match = re.search('LATENTDIR\s*=\s*(.*).*', data)
+    if match:
+        casedata.samples_generation['latentdata_dir'] = match.group(1)
+
     # Design parameters (training)
     match = re.search('DPARAMETERS_TRAIN\s*=\s*\(\s*LERADIUS\s*\,\s*(\d)\s*\,\s*TEANGLE\s*\,\s*(\d)\s*\,'
                       '\s*TMAX\s*\,\s*(\d)\s*\,\s*ZMAX\s*\,\s*(\d)\s*\,\s*ZMIN\s*\,\s*(\d)\s*\,\s*ZLE\s*\,\s*(\d)\s*\,'

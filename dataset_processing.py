@@ -13,14 +13,6 @@ from sklearn.preprocessing import QuantileTransformer
 
 from preprocessing import ImageTransformer
 import airfoil_reader
- 
-
-def preprocess_tf_data(im_tilde, im):
-
-    im_tilde_tf = tf.cast(im_tilde,tf.float32)
-    im_tf = tf.cast(im,tf.float32)
-
-    return im_tilde_tf, im_tf
 
 def preprocess_data(im_tilde, im):
 
@@ -28,31 +20,6 @@ def preprocess_data(im_tilde, im):
     im = im.astype(np.float32)
 
     return im_tilde, im
-
-def create_dataset_pipeline(dataset, is_train=True, num_threads=8, prefetch_buffer=100, batch_size=32):
-
-    dataset_tensor = tf.data.Dataset.from_tensor_slices(dataset)
-
-    if is_train:
-        dataset_tensor = dataset_tensor.shuffle(buffer_size=dataset[0].shape[0]).repeat()
-    dataset_tensor = dataset_tensor.map(preprocess_tf_data,num_parallel_calls=num_threads)
-    dataset_tensor = dataset_tensor.batch(batch_size)
-    dataset_tensor = dataset_tensor.prefetch(prefetch_buffer)
-
-    return dataset_tensor
-
-def get_tensorflow_datasets(data_train,data_cv,data_test,batch_size=32):
-
-    # Prepare tensor structures from data (image dataset + design vector data)
-    dataset_train = create_dataset_pipeline(data_train,is_train=True,batch_size=batch_size)
-    dataset_cv = create_dataset_pipeline(data_cv,is_train=False,batch_size=1)
-    dataset_test = preprocess_data(data_test[0],data_test[1])
-
-    # Prepare datasets
-    dataset_train = [dataset_train.element_spec[0],dataset_train.element_spec[1]]
-    dataset_cv = [dataset_cv.element_spec[0],dataset_cv.element_spec[1]]
-
-    return dataset_train, dataset_cv, dataset_test
 
 def preprocess_image(img, new_dims):
 
