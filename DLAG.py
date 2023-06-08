@@ -273,16 +273,12 @@ class CGenTrainer:
             #airfoil_camber_img = cv.bitwise_not(airfoil_camber_img)
             gray_img = cv.cvtColor(airfoil_camber_img,code=cv.COLOR_BGR2GRAY)
             airfoil_camber_blur_img = cv.medianBlur(gray_img,5)
-            #cv.imshow('blur',blur_img)
-            #cv.waitKey(0)
 
             # Read airfoil thickness contour from image
             airfoil_thickness_img = cv.imread(os.path.join(samples_dir,'thickness',sample))
             #airfoil_thickness_img = cv.bitwise_not(airfoil_thickness_img)
             gray_img = cv.cvtColor(airfoil_thickness_img,code=cv.COLOR_BGR2GRAY)
             airfoil_thickness_blur_img = cv.medianBlur(gray_img, 5)
-            # cv.imshow('blur',blur_img)
-            # cv.waitKey(0)
 
             # Scan
             ylim_c = (-0.015,0.15)
@@ -293,14 +289,16 @@ class CGenTrainer:
             xt_mean, zt_mean = postprocessing.get_mean_contour(airfoil_thickness_blur_img,threshold=200,ylims=ylim_t)
 
             # Standardize camber and thickness curves
-            x_mean = np.linspace(0,1,200)
+            x_mean = np.linspace(0,1,100)
             zc_mean_ = interpolate.interp1d(xc_mean,zc_mean,kind='quadratic',fill_value='extrapolate')(x_mean)
             zt_mean_ = interpolate.interp1d(xt_mean,zt_mean,kind='quadratic',fill_value='extrapolate')(x_mean)
-            # Chop
+            # Chop in case of a bad interpolation
             xc_mean, zc_mean = postprocessing.chop(x_mean,zc_mean_,zc_mean)
             xt_mean, zt_mean = postprocessing.chop(x_mean,zt_mean_,zt_mean)
             # Re-standardize
-            x_mean = np.linspace(min(xc_mean.min(),xt_mean.min()),max(xc_mean.max(),xt_mean.max()),zc_mean.size)
+            x_mean_min = min(xc_mean.min(),xt_mean.min())
+            x_mean_max = max(xc_mean.max(),xt_mean.max())
+            x_mean = np.linspace(x_mean_min,x_mean_max,zc_mean.size)
             zc_mean = interpolate.interp1d(xc_mean,zc_mean,kind='linear',fill_value='extrapolate')(x_mean)
             zt_mean = interpolate.interp1d(xt_mean,zt_mean,kind='linear',fill_value='extrapolate')(x_mean)
 
@@ -309,7 +307,8 @@ class CGenTrainer:
             zl_mean = zc_mean - zt_mean
 
             # Close upper and lower contours
-            xu, zu, xl, zl = postprocessing.close_contours(x_mean,zu_mean,zl_mean)
+            xu_closed, zu_closed, xl_closed, zl_closed = postprocessing.generate_le(x_mean,zu_mean,zl_mean)
+            xu_closed, zu_closed, xl_closed, zl_closed = postprocessing.generate_te(xu_closed,zu_closed,xl_closed,zl_closed)
 
             # Plot and store airfoil
             #airfoil_scanner = airfoil_reader.AirfoilScanner(os.path.join(self.case_dir,'Datasets','geometry','originals',sample.replace('.png','.dat')),
@@ -318,19 +317,18 @@ class CGenTrainer:
             plt.figure()
             plt.plot(x_mean,zc_mean,label='Mean camber',color='green')
             plt.plot(x_mean,zt_mean,label='Mean thickness',color='cyan')
-            #plt.plot(x_or,zc_or-ylim_c[0],label='Original camber',color='blue',linestyle='--')
-            #plt.plot(x_or,zt_or-ylim_t[0],label='Original thickness',color='green',linestyle='--')
             plt.xlabel('x')
             plt.ylabel('z')
             plt.legend()
             plt.savefig(os.path.join(storage_dir,airfoil+'_camber_thickness_airfoil.png'),dpi=200)
 
             plt.figure()
-            plt.plot(x_mean,zu_mean,label='Mean upperside',color='red')
-            plt.plot(x_mean, zc_mean,label='Mean camber',color='green',linestyle='--')
-            plt.plot(x_mean,zl_mean,label='Mean lowerside',color='blue')
+            plt.plot(xu_closed,zu_closed,label='Mean upperside',color='red')
+            plt.plot(x_mean,zc_mean,label='Mean camber',color='green',linestyle='--')
+            plt.plot(xl_closed,zl_closed,label='Mean lowerside',color='blue')
             plt.xlabel('x')
             plt.ylabel('z')
+            plt.ylim(-0.5,0.5)
             plt.savefig(os.path.join(storage_dir,airfoil+'_full_airfoil.png'),dpi=200)
             #plt.show(block=True)
 

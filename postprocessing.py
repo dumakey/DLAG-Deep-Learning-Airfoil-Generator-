@@ -1,7 +1,6 @@
 import os
 import numpy as np
 import cv2 as cv
-from math import sinh, cosh
 from matplotlib import pyplot as plt
 from random import randint
 from scipy.interpolate import interp1d
@@ -252,78 +251,151 @@ def get_mean_contour(img, threshold=200, ylims=None):
 
     return x_ref, y_ref
 
-def close_contours(x_open, zu_open, zl_open):
+def generate_le(x_open, zu_open, zl_open):
 
-    def f(z, a, b, c, d, e, f):
+    tmax_ratio = (zu_open[0] - zl_open[0])/(max(zu_open) - min(zl_open))
+    if tmax_ratio < 0.1:
+        x_le = 0.5*x_open[0] + 1e-05
+        z_le = -0.5*(zu_open[0] + zl_open[0])
+        i_xumin = i_xlmin = 0
+    else:
+        i_xmax = min(np.argmax(zu_open),np.argmax(abs(zl_open)))//2
+        i_xumin = 2
+        i_xlmin = 2
+        # Construct x and z coordinates range
+        x = np.concatenate((np.flipud(x_open[i_xumin:i_xmax]),x_open[i_xlmin:i_xmax]))
+        z = np.concatenate((-np.flipud(zu_open[i_xumin:i_xmax]),np.flipud(zl_open[i_xlmin:i_xmax])))
 
-        return a*z**5 + b*z**4 + c*z**3 + d*z**2 + e*z + f
+        # Intersection of upper-lower curves
+        i_z1 = i_xmax - i_xumin - 1
+        i_z2 = i_z1 + 1
+        zmax = 100*z[i_z2]
+        if z[-1] < z[-2]:
+            zmin = z[-1]
+        else:
+            zmin = z[0]
+        z_int = np.linspace(zmin,zmax,30)
+        xu_int = interp1d(z[0:i_z1],x[0:i_z1],kind='quadratic',fill_value='extrapolate')(z_int)
+        xl_int = interp1d(z[i_z2:],x[i_z2:],kind='quadratic',fill_value='extrapolate')(z_int)
 
-    def f_p(z, a, b, c, d, e):
+        # Compute intersection
+        z_inter = interp1d(xu_int-xl_int,z_int,kind='quadratic',fill_value='extrapolate')(0)
+        x_inter = interp1d(z_int,xu_int,kind='quadratic',fill_value='extrapolate')(z_inter)
 
-        return 5*a*z**4 + 4*b*z**3 + 3*c*z**2 + 2*d*z + e
+        # Bisector vector
+        dxudz_int = np.gradient(xu_int,z_int)
+        dxldz_int = np.gradient(xl_int,z_int)
+        dxudz_inter = interp1d(z_int,dxudz_int,kind='quadratic',fill_value='extrapolate')(z_inter)
+        dxldz_inter = interp1d(z_int,dxldz_int,kind='quadratic',fill_value='extrapolate')(z_inter)
 
-    def f_pp(z, a, b, c, d):
+        z1 = z_inter
+        x1 = x_inter
+        dz = z_int[1] - z_int[0]
+        if z[-1] < z[-2]:
+            z2 = z1 - dz
+            dxudz_inter = -dxudz_inter
+            dxldz_inter = -dxldz_inter
+        else:
+            z2 = z1 + dz
+        x2 = x1 + dxudz_inter*dz
+        x3 = x1 + dxldz_inter*dz
+        z3 = z2
 
-        return 20*z**3 + 12*b*z**2 + 6*c*z + 2*d
+        a = np.array([z2-z1,x2-x1])
+        b = np.array([z3-z1,x3-x1])
+        c = np.sqrt(np.dot(b,b)) * a + np.sqrt(np.dot(a,a)) * b
+        k = 5e5  # norm factor to amplify bisector vector
+        z4 = z1 + k*c[0]
+        x4 = x1 + k*c[1]
 
-    def F(C, *args):
+        # Compute intersection of bisector and chord-line between upper and lower sides
+        N = 30
+        chord_ul_z = np.linspace(z[i_z1],z[i_z2],N)
+        chord_ul_x = np.linspace(x[i_z1],x[i_z2],N)
+        bisector_x = interp1d([z1,z4],[x1,x4],kind='linear',fill_value='extrapolate')(chord_ul_z)
+        bisector_z = interp1d([x1,x4],[z1,z4],kind='linear',fill_value='extrapolate')(bisector_x)
+        z5 = interp1d(bisector_x-chord_ul_x,chord_ul_z,kind='quadratic',fill_value='extrapolate')(0)
+        x5 = interp1d(bisector_z,bisector_x,kind='quadratic',fill_value='extrapolate')(z5)
 
-        # C = a, b, c, d, e, f
+        # Compute leading edge point
+        z_le = 0.5 * (z1 + z5)
+        x_le = interp1d([z1,z5],[x1,x5],kind='linear',fill_value='extrapolate')(z_le)
+        '''
+        plt.figure()
+        plt.scatter(z,x,color='b',label='base points')
+        plt.plot(z_int,xu_int,color='r')
+        plt.plot(z_int,xl_int,color='g')
+        plt.scatter(z[i_z1],x[i_z1],color='r',label='P1')
+        plt.scatter(z[i_z2],x[i_z2],color='r',label='P2')
+        plt.scatter(z_le,x_le,color='g',label='PLE')
+        plt.xlabel('z')
+        plt.ylabel('x')
+        plt.xlim(-0.8*zu_open[i_xmax],1.3*z_inter)
+        plt.ylim(0.8*x_inter,1.1*x_open[i_xmax])
+        plt.legend()
+        plt.show(block=True)
+        '''
+    # Generate new upper and lower sides
+    '''
+    xu_round_1 = np.linspace(x_le,x_open[i_xumin],i_xmax-i_xumin)
+    xu_round_2 = x_open[i_xumin+1:]
+    xu_round = np.concatenate((xu_round_1,xu_round_2))
+    zu_round_1 = interp1d(x_open,zu_open,kind='quadratic',fill_value='extrapolate')(xu_round_1)
+    zu_round_2 = zu_open[i_xumin+1:]
+    zu_round = np.concatenate((zu_round_1,zu_round_2))
 
-        x, z, dxdz, d2xdz2 = args
+    xl_round_1 = np.linspace(x_le,x_open[i_xlmin],i_xmax-i_xlmin)
+    xl_round_2 = x_open[i_xlmin+1:]
+    xl_round = np.concatenate((xl_round_1,xl_round_2))
+    zl_round_1 = interp1d(x_open,zl_open,kind='quadratic',fill_value='extrapolate')(xl_round_1)
+    zl_round_2 = zl_open[i_xlmin+1:]
+    zl_round = np.concatenate((zl_round_1,zl_round_2))
+    '''
+    xu_round = np.concatenate((np.array([x_le]),x_open[i_xumin:]))
+    zu_round = np.concatenate((np.array([-z_le]),zu_open[i_xumin:]))
+    xl_round = np.concatenate((np.array([x_le]),x_open[i_xlmin:]))
+    zl_round = np.concatenate((np.array([-z_le]),zl_open[i_xlmin:]))
+    '''
+    plt.figure()
+    plt.plot(xu_round,zu_round,color='b',label='Round')
+    plt.plot(xl_round,zl_round,color='b',label='Round')
+    plt.scatter(x_le,-z_le,color='g')
+    plt.xlabel('z')
+    plt.ylabel('x')
+    plt.legend()
+    plt.show(block=True)
+    '''
+    return xu_round, zu_round, xl_round, zl_round
 
-        F = np.zeros((6,))
-        F[0] = f_p(z[0],C[0],C[1],C[2],C[3],C[4]) - dxdz[0]
-        F[1] = f_p(z[1],C[0],C[1],C[2],C[3],C[4]) - dxdz[1]
-        F[2] = f_pp(z[0],C[0],C[1],C[2],C[3]) - d2xdz2[0]
-        F[3] = f_pp(z[1],C[0],C[1],C[2],C[3]) - d2xdz2[1]
-        F[4] = f(z[0],C[0],C[1],C[2],C[3],C[4],C[5]) - x[0]
-        F[5] = f(z[1],C[0],C[1],C[2],C[3],C[4],C[5]) - x[1]
+def generate_te(xu_open, zu_open, xl_open, zl_open):
 
-        return F
+    xmin = min(max(xu_open),max(xl_open))
+    xmax = 1.2
+    x_int = np.linspace(xmin,xmax,30)
+    zu_int = interp1d(xu_open,zu_open,kind='quadratic',fill_value='extrapolate')(x_int)
+    zl_int = interp1d(xl_open,zl_open,kind='quadratic',fill_value='extrapolate')(x_int)
+
+    # Compute intersection
+    x_te = interp1d(zu_int-zl_int,x_int,kind='quadratic',fill_value='extrapolate')(0)
+    z_te = interp1d(x_int,zu_int,kind='quadratic',fill_value='extrapolate')(x_te)
+
+    # Concatenate
+    xu_closed = np.concatenate((xu_open,np.array([x_te])))
+    zu_closed = np.concatenate((zu_open,np.array([z_te])))
+    xl_closed = np.concatenate((xl_open,np.array([x_te])))
+    zl_closed = np.concatenate((zl_open,np.array([z_te])))
+
+    plt.figure()
+    plt.plot(xu_open,zu_open,label='Upperside open',color='g',alpha=0.7)
+    plt.plot(xl_open,zl_open,label='Lowerside open',color='g',alpha=0.7)
+    plt.plot(xu_closed,zu_closed,label='Upperside open',color='r')
+    plt.plot(xl_closed,zl_closed,label='Lowerside open',color='r')
+    plt.ylabel('z')
+    plt.xlabel('x')
+    plt.legend()
+
+    return xu_closed, zu_closed, xl_closed, zl_closed
 
 
-    i_xmax = min(np.argmax(zu_open),np.argmax(zl_open))//2
-    i_xmin = 15
-    # Construct x and z coordinates range
-    x = np.concatenate((np.flipud(x_open[i_xmin:i_xmax]),np.array([x_open[0]]),x_open[i_xmin:i_xmax]))
-    z = np.concatenate((-np.flipud(zu_open[i_xmin:i_xmax]),-np.array([zu_open[0]]),-np.flipud(zl_open[i_xmin:i_xmax])))
-
-    # Compute F-function parameters
-    i_z1 = (i_xmax-i_xmin)//2
-    i_z2 = (i_xmax-i_xmin) + 1 + (i_xmax-i_xmin)//2
-
-    zeval = np.zeros((2,))
-    zeval[0] = z[i_z1]
-    zeval[1] = z[i_z2]
-
-    xeval = np.zeros((2,))
-    xeval[0] = x[i_z1]
-    xeval[1] = x[i_z2]
-
-    dxdz = np.gradient(x,z)
-    dxdz_eval = np.zeros((2,))
-    dxdz_eval[0] = dxdz[i_z1]
-    dxdz_eval[1] = dxdz[i_z2]
-
-    d2xdz2 = np.gradient(dxdz,z)
-    d2xdz2_eval = np.zeros((2,))
-    d2xdz2_eval[0] = d2xdz2[i_z1]
-    d2xdz2_eval[1] = d2xdz2[i_z2]
-
-    X0 = [1,1,1,1,1,1]
-    coeffs = fsolve(F,X0,args=(xeval,zeval,dxdz_eval,d2xdz2_eval))
-
-    zq = np.linspace(z[0],z[-1],100)
-    xq = f(zq,*coeffs)
-
-    fig, ax = plt.subplots(1,)
-    ax.scatter(z,x)
-    ax.scatter(zeval[0],x[i_z1],color='r',label='z2')
-    ax.scatter(zeval[1],x[i_z2],color='g',label='z3')
-    ax.plot(zq,xq,color='c',linestyle='--',label='Polynomial')
-    #ax.set_ylim(0.02,0.17);
-    #ax.set_xlim(-0.12,0.008);
-    print()
 
 
