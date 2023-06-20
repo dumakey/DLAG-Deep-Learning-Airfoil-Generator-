@@ -255,18 +255,26 @@ def generate_le(x_open, zu_open, zl_open):
 
     tmax_ratio = (zu_open[0] - zl_open[0])/(max(zu_open) - min(zl_open))
     if tmax_ratio < 0.1:
-        x_le = 0.5*x_open[0] + 1e-05
+        x_le = 0.85*x_open[0] + 1e-05
         z_le = -0.5*(zu_open[0] + zl_open[0])
         i_xumin = i_xlmin = 0
     else:
-        i_xmax = min(np.argmax(zu_open),np.argmax(abs(zl_open)))//2
+        # Computation of chordwise positions where dzdx = 0, searching only in the first half of the airfoil
+        N = x_open.size//2
+        dzudx = np.gradient(zu_open[:N],x_open[:N])
+        x_zu_open_max = interp1d(dzudx[:N],x_open[:N],kind='quadratic')(0)
+
+        dzldx = np.gradient(zl_open[:N],x_open[:N])
+        x_zl_open_max = interp1d(dzldx[:N],x_open[:N],kind='quadratic')(0)
+
+        i_xmax = min(np.where(x_open >= x_zu_open_max)[0][0],np.where(x_open >= x_zl_open_max)[0][0])//2
         i_xumin = 2
         i_xlmin = 2
         # Construct x and z coordinates range
         x = np.concatenate((np.flipud(x_open[i_xumin:i_xmax]),x_open[i_xlmin:i_xmax]))
         z = np.concatenate((-np.flipud(zu_open[i_xumin:i_xmax]),np.flipud(zl_open[i_xlmin:i_xmax])))
 
-        # Intersection of upper-lower curves
+        # 1. Intersection of upper-lower curves
         i_z1 = i_xmax - i_xumin - 1
         i_z2 = i_z1 + 1
         zmax = 100*z[i_z2]
@@ -278,11 +286,11 @@ def generate_le(x_open, zu_open, zl_open):
         xu_int = interp1d(z[0:i_z1],x[0:i_z1],kind='quadratic',fill_value='extrapolate')(z_int)
         xl_int = interp1d(z[i_z2:],x[i_z2:],kind='quadratic',fill_value='extrapolate')(z_int)
 
-        # Compute intersection
+        # 2. Compute intersection
         z_inter = interp1d(xu_int-xl_int,z_int,kind='quadratic',fill_value='extrapolate')(0)
         x_inter = interp1d(z_int,xu_int,kind='quadratic',fill_value='extrapolate')(z_inter)
 
-        # Bisector vector
+        # 3. Bisector vector
         dxudz_int = np.gradient(xu_int,z_int)
         dxldz_int = np.gradient(xl_int,z_int)
         dxudz_inter = interp1d(z_int,dxudz_int,kind='quadratic',fill_value='extrapolate')(z_inter)
@@ -308,7 +316,7 @@ def generate_le(x_open, zu_open, zl_open):
         z4 = z1 + k*c[0]
         x4 = x1 + k*c[1]
 
-        # Compute intersection of bisector and chord-line between upper and lower sides
+        # 4. Compute intersection of bisector and chord-line between upper and lower sides
         N = 30
         chord_ul_z = np.linspace(z[i_z1],z[i_z2],N)
         chord_ul_x = np.linspace(x[i_z1],x[i_z2],N)
@@ -317,7 +325,7 @@ def generate_le(x_open, zu_open, zl_open):
         z5 = interp1d(bisector_x-chord_ul_x,chord_ul_z,kind='quadratic',fill_value='extrapolate')(0)
         x5 = interp1d(bisector_z,bisector_x,kind='quadratic',fill_value='extrapolate')(z5)
 
-        # Compute leading edge point
+        # 5. Compute leading edge point
         z_le = 0.5 * (z1 + z5)
         x_le = interp1d([z1,z5],[x1,x5],kind='linear',fill_value='extrapolate')(z_le)
         '''
@@ -372,12 +380,12 @@ def generate_te(xu_open, zu_open, xl_open, zl_open):
     xmin = min(max(xu_open),max(xl_open))
     xmax = 1.2
     x_int = np.linspace(xmin,xmax,30)
-    zu_int = interp1d(xu_open,zu_open,kind='quadratic',fill_value='extrapolate')(x_int)
-    zl_int = interp1d(xl_open,zl_open,kind='quadratic',fill_value='extrapolate')(x_int)
+    zu_int = interp1d(xu_open,zu_open,fill_value='extrapolate')(x_int)
+    zl_int = interp1d(xl_open,zl_open,fill_value='extrapolate')(x_int)
 
     # Compute intersection
-    x_te = interp1d(zu_int-zl_int,x_int,kind='quadratic',fill_value='extrapolate')(0)
-    z_te = interp1d(x_int,zu_int,kind='quadratic',fill_value='extrapolate')(x_te)
+    x_te = interp1d(zu_int-zl_int,x_int,fill_value='extrapolate')(0)
+    z_te = interp1d(x_int,zu_int,fill_value='extrapolate')(x_te)
 
     # Concatenate
     xu_closed = np.concatenate((xu_open,np.array([x_te])))
@@ -385,6 +393,7 @@ def generate_te(xu_open, zu_open, xl_open, zl_open):
     xl_closed = np.concatenate((xl_open,np.array([x_te])))
     zl_closed = np.concatenate((zl_open,np.array([z_te])))
 
+    '''
     plt.figure()
     plt.plot(xu_open,zu_open,label='Upperside open',color='g',alpha=0.7)
     plt.plot(xl_open,zl_open,label='Lowerside open',color='g',alpha=0.7)
@@ -393,7 +402,7 @@ def generate_te(xu_open, zu_open, xl_open, zl_open):
     plt.ylabel('z')
     plt.xlabel('x')
     plt.legend()
-
+    '''
     return xu_closed, zu_closed, xl_closed, zl_closed
 
 

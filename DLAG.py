@@ -10,7 +10,6 @@ import pickle
 import cv2 as cv
 from random import randint
 from scipy.interpolate import interpolate
-from scipy.signal import lfilter
 
 import tensorflow as tf
 from sklearn.preprocessing import QuantileTransformer
@@ -106,13 +105,13 @@ class CGenTrainer:
         batch_size = self.parameters.training_parameters['batch_size']
         img_size = self.parameters.img_size
         design_parameters_train = self.parameters.design_parameters_train
-        airfoil_analysis = self.parameters.analysis['airfoil_analysis']
+        airfoil_dzdx_analysis = self.parameters.analysis['airfoil_dzdx_analysis']
 
         # Read dataset
         self.datasets.samples_train, self.datasets.data_train, self.datasets.b_train, \
         self.datasets.samples_cv, self.datasets.data_cv, self.datasets.b_cv, \
         self.datasets.samples_test, self.datasets.data_test, self.datasets.b_test = \
-        dataset_processing.get_datasets(case_dir,design_parameters_train,training_size,img_size,airfoil_analysis)
+        dataset_processing.get_datasets(case_dir,design_parameters_train,training_size,img_size,airfoil_dzdx_analysis)
 
         if self.model.imported == False:
             self.train_model(sens_variable)
@@ -127,13 +126,13 @@ class CGenTrainer:
         batch_size = self.parameters.training_parameters['batch_size']
         img_size = self.parameters.img_size
         design_parameters_train = self.parameters.design_parameters_train
-        airfoil_analysis = self.parameters.analysis['airfoil_analysis']
+        airfoil_dzdx_analysis = self.parameters.analysis['airfoil_dzdx_analysis']
 
         # Read dataset
         self.datasets.samples_train, self.datasets.data_train, self.datasets.b_train, \
         self.datasets.samples_cv, self.datasets.data_cv, self.datasets.b_cv, \
         self.datasets.samples_test, self.datasets.data_test, self.datasets.b_test = \
-        dataset_processing.get_datasets(case_dir,design_parameters_train,training_size,img_size,airfoil_analysis)
+        dataset_processing.get_datasets(case_dir,design_parameters_train,training_size,img_size,airfoil_dzdx_analysis)
 
         # Train
         if self.model.imported == False:
@@ -150,13 +149,13 @@ class CGenTrainer:
         batch_size = self.parameters.training_parameters['batch_size']
         img_size = self.parameters.img_size
         design_parameters_train = self.parameters.design_parameters_train
-        airfoil_analysis = self.parameters.analysis['airfoil_analysis']
+        airfoil_dzdx_analysis = self.parameters.analysis['airfoil_dzdx_analysis']
 
         # Read dataset
         self.datasets.samples_train, self.datasets.data_train, self.datasets.b_train, \
         self.datasets.samples_cv, self.datasets.data_cv, self.datasets.b_cv, \
         self.datasets.samples_test, self.datasets.data_test, self.datasets.b_test = \
-        dataset_processing.get_datasets(case_dir,design_parameters_train,training_size,img_size,airfoil_analysis)
+        dataset_processing.get_datasets(case_dir,design_parameters_train,training_size,img_size,airfoil_dzdx_analysis)
 
         if self.model.imported == False:
             self.train_model()
@@ -187,7 +186,7 @@ class CGenTrainer:
         # Read case parameters from "pretrained model" folder
         casedata = reader.read_case_logfile(os.path.join(self.case_dir,'Results','pretrained_model','DLAG.log'))
         design_parameters_on_logfile = [item for item in casedata.design_parameters_train.keys() if item != 'xdzdx']  # exclude (training) slope controlpoints x-locations
-        design_parameters_on_launch = self.parameters.design_parameters_des
+        design_parameters_on_launcher = self.parameters.design_parameters_des
         bcheck = set([True if item in design_parameters_on_logfile else False
                       for item in self.parameters.design_parameters_des.keys() if not item.startswith('dzdx')])
         if bcheck != {True}: # if not all design parameters are included in the (design) parameters used for training
@@ -196,7 +195,7 @@ class CGenTrainer:
             if 'dzdx' in self.parameters.design_parameters_des:
                 del self.parameters.design_parameters_des['dzdx']
             # Assign the specified design parameters to the "available" training design parameters
-            for parameter, value in design_parameters_on_launch.items():
+            for parameter, value in design_parameters_on_launcher.items():
                 if parameter in self.parameters.design_parameters_des.keys():
                     self.parameters.design_parameters_des[parameter] = value
             # If not all the specified design parameters match with the training design parameters
@@ -206,14 +205,14 @@ class CGenTrainer:
                                 '{}'.format(list(casedata.design_parameters_train.keys())))
 
         # Add the curvature control points design parameters, if they exist
-        dzdx_cp = [design_parameters_on_launch[item] for item in design_parameters_on_launch.keys()
+        dzdx_cp = [design_parameters_on_launcher[item] for item in design_parameters_on_launcher.keys()
                    if item == 'dzdx_c' or item == 'dzdx_t']
         if dzdx_cp:
-            if 'dzdx_c' in design_parameters_on_launch.keys():
-                self.parameters.design_parameters_des['dzdx'] = ('camber',design_parameters_on_launch['dzdx_c'])
+            if 'dzdx_c' in design_parameters_on_launcher.keys():
+                self.parameters.design_parameters_des['dzdx'] = ('camber',design_parameters_on_launcher['dzdx_c'])
                 del self.parameters.design_parameters_des['dzdx_c']
-            elif 'dzdx_t' in design_parameters_on_launch.keys():
-                self.parameters.design_parameters_des['dzdx'] = ('thickness',design_parameters_on_launch['dzdx_t'])
+            elif 'dzdx_t' in design_parameters_on_launcher.keys():
+                self.parameters.design_parameters_des['dzdx'] = ('thickness',design_parameters_on_launcher['dzdx_t'])
                 del self.parameters.design_parameters_des['dzdx_t']
         casedata.design_parameters_des = self.parameters.design_parameters_des.copy()
 
@@ -222,9 +221,6 @@ class CGenTrainer:
         n_samples = self.parameters.samples_generation['n_samples']
         training_size = casedata.training_parameters['train_size']
         img_size = casedata.img_size
-        supply_latent = self.parameters.samples_generation['supply_latent']
-        if supply_latent:
-            latentdata_folder = self.parameters.samples_generation['latentdata_dir']
 
         if self.model.imported == False:
             self.singletraining()
@@ -241,7 +237,7 @@ class CGenTrainer:
                                                     storage_dir,stage='Test')
 
         ## GENERATE NEW DATA - SAMPLING ##
-        X_samples = self.generate_samples(casedata,storage_dir,supply_latent=supply_latent,latentdata_folder=latentdata_folder)
+        X_samples = self.generate_samples(casedata,storage_dir)
         postprocessing.plot_generated_samples(X_samples,img_size,storage_dir)
 
     def scan_airfoil(self):
@@ -311,9 +307,6 @@ class CGenTrainer:
             xu_closed, zu_closed, xl_closed, zl_closed = postprocessing.generate_te(xu_closed,zu_closed,xl_closed,zl_closed)
 
             # Plot and store airfoil
-            #airfoil_scanner = airfoil_reader.AirfoilScanner(os.path.join(self.case_dir,'Datasets','geometry','originals',sample.replace('.png','.dat')),
-            #                                 self.parameters.design_parameters_train)
-            #_, _, _, _, x_or, zc_or, zt_or = airfoil_scanner.scan_geometry()
             plt.figure()
             plt.plot(x_mean,zc_mean,label='Mean camber',color='green')
             plt.plot(x_mean,zt_mean,label='Mean thickness',color='cyan')
@@ -324,13 +317,14 @@ class CGenTrainer:
 
             plt.figure()
             plt.plot(xu_closed,zu_closed,label='Mean upperside',color='red')
-            plt.plot(x_mean,zc_mean,label='Mean camber',color='green',linestyle='--')
+            plt.plot(x_mean[5:-5],zc_mean[5:-5],label='Mean camber',color='green',linestyle='--')
             plt.plot(xl_closed,zl_closed,label='Mean lowerside',color='blue')
             plt.xlabel('x')
             plt.ylabel('z')
             plt.ylim(-0.5,0.5)
             plt.savefig(os.path.join(storage_dir,airfoil+'_full_airfoil.png'),dpi=200)
             #plt.show(block=True)
+            plt.close('all')
 
             # Write upper, lower data to file (in the appropriate format)
             geo_airfoil_fname = '{}_airfoil.dat'.format(sample.split('.png')[0])
@@ -344,16 +338,24 @@ class CGenTrainer:
             file.close()
 
             # Read airfoil geometry and extract features
-            airfoil_scanner = airfoil_reader.AirfoilScanner(os.path.join(storage_dir,geo_airfoil_fname),design_parameters)
+            features = [
+            'leradius','teangle','tmax','xtmax','zmax','xzmax','zmin','xzmin','zle','zte','xdzcdx','xdztdx','xdzudx','xdzldx',
+            ]
+            features = dict.fromkeys(features,None)
+            features['xdzcdx'] = ('camber',design_parameters['xdzdx'][1])
+            features['xdztdx'] = ('thickness',design_parameters['xdzdx'][1])
+            features['xdzudx'] = ('upper',design_parameters['xdzdx'][1])
+            features['xdzldx'] = ('lower',design_parameters['xdzdx'][1])
+
+            airfoil_scanner = airfoil_reader.AirfoilScanner(os.path.join(storage_dir,geo_airfoil_fname),features,airfoil_analysis='full')
             airfoil_scanner.scan_geometry(return_geometry=False)
             airfoil_scanner.set_parameters()
 
             # Export data
-            parameters = list(airfoil_scanner.design_parameters.keys())
             data = list(airfoil_scanner.design_parameters.values())
-            data_df = pd.DataFrame(index=parameters,columns=['Design parameters'],data=data)
-            if 'teangle' in parameters:
-                data_df.loc['teangle'] = 180/np.pi * data_df.loc['teangle']
+            parameter_list = list(airfoil_scanner.design_parameters.keys())
+            data_df = pd.DataFrame(index=parameter_list,columns=['Design parameters'],data=data)
+            data_df.loc['teangle'] = 180/np.pi * data_df.loc['teangle']
             airfoil_data_fname = '{}_airfoil_design_parameters.csv'.format(airfoil)
             data_df.to_csv(os.path.join(storage_dir,airfoil_data_fname),sep=';',decimal='.')
 
@@ -371,7 +373,7 @@ class CGenTrainer:
         # Read case parameters from "pretrained model" folder
         casedata = reader.read_case_logfile(os.path.join(self.case_dir,'Results','pretrained_model','DLAG.log'))
         design_parameters_on_logfile = [item for item in casedata.design_parameters_train.keys() if item != 'xdzdx']  # exclude (training) slope controlpoints x-locations
-        design_parameters_on_launch = self.parameters.design_parameters_des
+        design_parameters_on_launcher = self.parameters.design_parameters_des
         bcheck = set([True if item in design_parameters_on_logfile else False
                       for item in self.parameters.design_parameters_des.keys() if not item.startswith('dzdx')])
         if bcheck != {True}: # if not all design parameters are included in the (design) parameters used for training
@@ -380,7 +382,7 @@ class CGenTrainer:
             if 'dzdx' in self.parameters.design_parameters_des:
                 del self.parameters.design_parameters_des['dzdx']
             # Assign the specified design parameters to the "available" training design parameters
-            for parameter, value in design_parameters_on_launch.items():
+            for parameter, value in design_parameters_on_launcher.items():
                 if parameter in self.parameters.design_parameters_des.keys():
                     self.parameters.design_parameters_des[parameter] = value
             # If not all the specified design parameters match with the training design parameters
@@ -390,7 +392,7 @@ class CGenTrainer:
                                 '{}'.format(list(casedata.design_parameters_train.keys())))
 
         # Add the curvature control points design parameters, if they exist
-        dzdx_cp = [design_parameters_on_launch[item] for item in design_parameters_on_launch.keys()
+        dzdx_cp = [design_parameters_on_launcher[item] for item in design_parameters_on_launcher.keys()
                    if item == 'dzdx_c' or item == 'dzdx_t']
         if dzdx_cp:
             if 'dzdx_c' in design_parameters_on_launch.keys():
@@ -626,7 +628,7 @@ class CGenTrainer:
                                                         validation_data=([self.datasets.data_cv,self.datasets.b_cv],
                                                         self.datasets.data_cv)))
 
-    def generate_samples(self, parameters, storage_dir, supply_latent=False, latentdata_folder=None):
+    def generate_samples(self, parameters, storage_dir):
 
         def build_design_vector(parameters, case_folder):
 
@@ -647,8 +649,10 @@ class CGenTrainer:
 
             # Normalize vector
             if 'dzdx' in parameters.design_parameters_des.keys():
-                airfoil_analysis = parameters.design_parameters_des['dzdx'][0]
-            _, b_tr, _ = dataset_processing.get_design_data(parameters.design_parameters_train,airfoil_analysis,case_folder)
+                airfoil_dzdx_analysis = parameters.design_parameters_des['dzdx'][0]
+            else:
+                airfoil_dzdx_analysis = None
+            _, b_tr, _ = dataset_processing.get_design_data(parameters.design_parameters_train,airfoil_dzdx_analysis,case_folder)
             scaler = QuantileTransformer().fit(b_tr)  # the data is fit to the whole amount of samples (this can affect training)
             b_norm = scaler.transform(np.expand_dims(b,axis=0))
 
@@ -691,21 +695,12 @@ class CGenTrainer:
             ## Sample images ##
             geometry_folder = os.path.join(self.case_dir,'Datasets','geometry','originals')
             samples = np.zeros([n_samples,np.prod(output_dim)])
-            if supply_latent == True:
-                latent_vectors_file = [file for file in os.listdir(latentdata_folder) if file.startswith('Latent_vectors')]
-                latent_vectors = pd.read_csv(os.path.join(latentdata_folder,latent_vectors_file[0]),delimiter=';')
-                latent_vectors = latent_vectors.iloc[:,1:]
-                for i in range(n_samples):
-                    t = tf.reshape(tf.convert_to_tensor(latent_vectors.iloc[:,i]),(1,latent_dim))
-                    b_des = build_design_vector(parameters,geometry_folder)
-                    samples[i,:] = decoder.predict([t,b_des],steps=1)
-            else:
-                latent_vectors = np.zeros((latent_dim,n_samples))
-                for i in range(n_samples):
-                    t = tf.random.normal(shape=(1,latent_dim))
-                    latent_vectors[:,i] = latent_model.predict(t,steps=1)
-                    b_des = build_design_vector(parameters,geometry_folder)
-                    samples[i,:] = decoder.predict([t,b_des],steps=1)
+            latent_vectors = np.zeros((latent_dim,n_samples))
+            for i in range(n_samples):
+                t = tf.random.normal(shape=(1,latent_dim))
+                latent_vectors[:,i] = latent_model.predict(t,steps=1)
+                b_des = build_design_vector(parameters,geometry_folder)
+                samples[i,:] = decoder.predict([t,b_des],steps=1)
             X_samples.append(samples)
 
             ## Export latent vectors
@@ -913,7 +908,10 @@ class CGenTrainer:
         try:
             casedata = reader.read_case_logfile(os.path.join(storage_dir,'DLAG.log'))
             img_dim = casedata.img_size
-            n_dest = len(casedata.design_parameters_train.keys()) + len(casedata.design_parameters_train['xdzdx'][1]) - 1
+            if 'xdzdx' in casedata.design_parameters_train.keys():
+                n_dest = len(casedata.design_parameters_train.keys()) + len(casedata.design_parameters_train['xdzdx'][1]) - 1
+            else:
+                n_dest = len(casedata.design_parameters_train.keys())
             latent_dim = casedata.training_parameters['latent_dim']
             enc_hidden_layers = casedata.training_parameters['enc_hidden_layers']
             dec_hidden_layers = casedata.training_parameters['dec_hidden_layers']
@@ -979,14 +977,15 @@ class CGenTrainer:
 
             design = OrderedDict()
             design['DESIGN PARAMETERS TRAIN'] = [item.upper() for item in parameters.design_parameters_train.keys() if item != 'xdzdx']
-            design['DESIGN PARAMETERS TRAIN'].append('XDZDX_C' if parameters.analysis['airfoil_analysis'] == 'camber' else 'XDZDX_T')
-            design['XDZDX CONTROLPOINTS TRAIN'] = parameters.design_parameters_train['xdzdx'][-1]
+            if 'xdzdx' in parameters.design_parameters_train.keys():
+                design['DESIGN PARAMETERS TRAIN'].append('XDZDX_C' if parameters.analysis['airfoil_dzdx_analysis'] == 'camber' else 'XDZDX_T')
+                design['XDZDX CONTROLPOINTS TRAIN'] = parameters.design_parameters_train['xdzdx'][-1]
 
             analysis = OrderedDict()
             analysis['CASE ID'] = parameters.analysis['case_ID']
             analysis['ANALYSIS'] = parameters.analysis['type']
-            analysis['AIRFOIL ANALYSIS'] = parameters.analysis['airfoil_analysis']
-            analysis['DESIGN AIRFOIL ANALYSIS'] = parameters.analysis['airfoil_analysis_des']
+            analysis['AIRFOIL DZDX ANALYSIS'] = parameters.analysis['airfoil_dzdx_analysis']
+            analysis['DESIGN AIRFOIL DZDX ANALYSIS'] = parameters.analysis['airfoil_dzdx_analysis_des']
             analysis['IMPORTED MODEL'] = parameters.analysis['import']
             analysis['LAST TRAINING LOSS'] = ['{:.3f}'.format(history.history['loss'][-1]) for history in model.History]
             analysis['LAST CV LOSS'] = ['{:.3f}'.format(history.history['val_loss'][-1]) for history in model.History]

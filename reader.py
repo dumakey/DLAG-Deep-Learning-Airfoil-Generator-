@@ -45,14 +45,14 @@ def read_case_setup(launch_filepath):
         casedata.analysis['conditional'] = int(match.group(1))
 
     # Type of airfoil analysis (camber/thickness)
-    match = re.search('AIRFOILANALYSIS\s*=\s*(\w+).*', data)
+    match = re.search('AIRFOIL_DZDX_ANALYSIS\s*=\s*(\w+).*', data)
     if match:
-        casedata.analysis['airfoil_analysis'] = str.lower(match.group(1))
+        casedata.analysis['airfoil_dzdx_analysis'] = str.lower(match.group(1))
 
     # Type of airfoil analysis (camber/thickness)
-    match = re.search('AIRFOILANALYSIS_DES\s*=\s*(\w+).*', data)
+    match = re.search('AIRFOIL_DZDX_ANALYSIS_DES\s*=\s*(\w+).*', data)
     if match:
-        casedata.analysis['airfoil_analysis_des'] = str.lower(match.group(1))
+        casedata.analysis['airfoil_dzdx_analysis_des'] = str.lower(match.group(1))
 
     # Import
     match = re.search('IMPORTMODEL\s*=\s*(\d).*', data)
@@ -223,8 +223,8 @@ def read_case_setup(launch_filepath):
     # Design parameters (generation)
     match = re.search('DPARAMETERS_DES\s*=\s*\(\s*LERADIUS\s*\,\s*(.*|NONE)\s*\,\s*TEANGLE\s*\,\s*(.*|NONE)\s*\,'
                       '\s*TMAX\s*\,\s*(.*|NONE)\s*\,\s*ZMAX\s*\,\s*(.*|NONE)\s*\,\s*ZMIN\s*\,\s*(.*|NONE)\s*\,'
-                      '\s*ZLE\s*\,\s*(.*|NONE)\s*\,\s*ZTE\s*\,\s*(.*|NONE)\s*\,\s*DZDX_C\s*\,\s*\(*(.*|NONE)\s*\)*\s*\,'
-                      '\s*DZDX_T\s*\,\s*\(*(.*|NONE)\)*\s*\).*', data)
+                      '\s*ZLE\s*\,\s*(.*|NONE)\s*\,\s*ZTE\s*\,\s*(.*|NONE)\s*\,\s*DZDX_U\s*\,\s*\(*(.*|NONE)\s*\)*\s*\,'
+                      '\s*DZDX_L\s*\,\s*\(*(.*|NONE)\)*\s*\).*', data)
     if match:
         if match.group(1) != 'NONE':
             casedata.design_parameters_des['leradius'] = float(match.group(1))
@@ -240,18 +240,16 @@ def read_case_setup(launch_filepath):
             casedata.design_parameters_des['zle'] = float(match.group(6))
         if match.group(7) != 'NONE':
             casedata.design_parameters_des['zte'] = float(match.group(7))
-        if match.group(8) != 'NONE':
-            dzdx_c_matches = re.findall('(\-*\d+\.*\d+)', match.group(8))
-            if len(dzdx_c_matches) != 0:
-                casedata.design_parameters_des['dzdx_c'] = [float(item) for item in dzdx_c_matches]
-            else:
-                casedata.design_parameters_des['dzdx_c'] = None
-        if match.group(9) != 'NONE':
-            dzdx_t_matches = re.findall('(\-*\d+\.*\d+)', match.group(9))
-            if len(dzdx_t_matches) != 0:
-                casedata.design_parameters_des['dzdx_t'] = [float(item) for item in dzdx_t_matches]
-            else:
-                casedata.design_parameters_des['dzdx_t'] = None
+        if match.group(8) != 'NONE' and match.group(9) != 'NONE':
+            dzdx_u_matches = [float(item) for item in re.findall('(\-*\d+\.*\d+)', match.group(8))]
+            dzdx_l_matches = [float(item) for item in re.findall('(\-*\d+\.*\d+)', match.group(9))]
+            
+            Npoints = len(dzdx_u_matches)
+            if casedata.analysis['airfoil_dzdx_analysis_des'] == 'camber':
+                casedata.design_parameters_des['dzdx_c'] = [0.5*(dzdx_u_matches[i]+dzdx_l_matches[i]) for i in range(Npoints)]
+            elif casedata.analysis['airfoil_dzdx_analysis_des'] == 'thickness':
+                casedata.design_parameters_des['dzdx_t'] = [0.5*(dzdx_u_matches[i]-dzdx_l_matches[i]) for i in range(Npoints)]
+
 
     ######################################## Image processing parameters ###############################################
     # Image resize
@@ -364,14 +362,14 @@ def read_case_logfile(log_filepath):
         casedata.analysis['type'] = str.lower(match.group(1))
 
     # Type of airfoil analysis (camber/thickness)
-    match = re.search('AIRFOIL ANALYSIS\s*=\s*(\w+).*', data)
+    match = re.search('AIRFOIL DZDX ANALYSIS\s*=\s*(\w+).*', data)
     if match:
-        casedata.analysis['airfoil_analysis'] = str.lower(match.group(1))
+        casedata.analysis['airfoil_dzdx_analysis'] = str.lower(match.group(1))
 
     # Type of airfoil analysis (camber/thickness)
-    match = re.search('DESIGN AIRFOIL ANALYSIS\s*=\s*(\w+).*', data)
+    match = re.search('DESIGN AIRFOIL DZDX ANALYSIS\s*=\s*(\w+).*', data)
     if match:
-        casedata.analysis['airfoil_analysis_des'] = str.lower(match.group(1))
+        casedata.analysis['airfoil_dzdx_analysis_des'] = str.lower(match.group(1))
 
     # Image shape
     match = re.search('INPUT SHAPE\s*=\s*\((.*)\).*', data)
@@ -481,10 +479,7 @@ def read_case_logfile(log_filepath):
     if match:
         matches = re.findall('(\w+)',match.group(1))
         if matches:
-            if len(matches) == 1:
-                casedata.design_parameters_train['parameters'] = str.lower(matches[0])
-            else:
-                casedata.design_parameters_train['parameters'] = [str.lower(item) for item in matches]
+            casedata.design_parameters_train['parameters'] = [str.lower(item) for item in matches]
 
     # DZDX controlpoints (training)
     match = re.search('XDZDX CONTROLPOINTS TRAIN\s*=\s*\[(.*)\]', data)
@@ -492,11 +487,12 @@ def read_case_logfile(log_filepath):
         matches = re.findall('(\d+\.?\d*)',match.group(1))
         if matches:
             casedata.design_parameters_train['xdzdx_cp'] = float(matches[0]) if len(matches) == 1 else [float(item) for item in matches]
-        else:
-            casedata.design_parameters_train['xdzdx_cp'] = None
+    else:
+        casedata.design_parameters_train['xdzdx_cp'] = None
 
     # Design parameters standardisation (training)
     casedata.design_parameters_train_std = dict.fromkeys(casedata.design_parameters_train['parameters'])
+    #if 'xdzdx_cp' in casedata.design_parameters_train['parameters']:
     if casedata.design_parameters_train['xdzdx_cp'] != None:
         if 'xdzdx_c' in casedata.design_parameters_train_std:
             del casedata.design_parameters_train_std['xdzdx_c']

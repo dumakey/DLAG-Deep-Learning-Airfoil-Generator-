@@ -39,17 +39,17 @@ def preprocess_image(img, new_dims):
 
     return imgs_processed
 
-def read_dataset(case_folder, airfoil_analysis, dataset_folder, format='png'):
+def read_dataset(case_folder, airfoil_dzdx_analysis, dataset_folder, format='png'):
 
     plots_folder = os.path.join(case_folder,'Datasets','plots',dataset_folder)
     airfoil_fpaths = []
     for (root, case_dirs, _) in os.walk(plots_folder):
-        if airfoil_analysis == 'camber' or airfoil_analysis == None:
+        if airfoil_dzdx_analysis == 'camber' or airfoil_dzdx_analysis == None:
             for case_dir in case_dirs:
                 files = [os.path.join(root,case_dir,file) for file in os.listdir(os.path.join(root,case_dir))
                          if file.endswith(format) if not file.endswith('_s%s' %format)]
                 airfoil_fpaths += files
-        elif airfoil_analysis == 'thickness':
+        elif airfoil_dzdx_analysis == 'thickness':
             for case_dir in case_dirs:
                 files = [os.path.join(root,case_dir,file) for file in os.listdir(os.path.join(root,case_dir))
                          if file.endswith(format)]
@@ -82,7 +82,7 @@ def plot_dataset(dataset_folder, fpaths, dataset_type='Originals'):
     ylim_l = (-0.1,0.15)
     line_width = 6
     for fpath in fpaths:
-        airfoil_scanner = airfoil_reader.AirfoilScanner(fpath,{})
+        airfoil_scanner = airfoil_reader.AirfoilScanner(fpath,{},airfoil_analysis='full')
         xu, zu, xl, zl, x, zc, zt, name = airfoil_scanner.get_geometry()
 
         if not name.endswith('_s'):
@@ -133,10 +133,10 @@ def get_design_dataset(samples, X, airfoil_data):
 
     return b
 
-def get_design_data(design_parameters, airfoil_analysis, geo_folder):
+def get_design_data(design_parameters, airfoil_dzdx_analysis, geo_folder):
 
     # Get design parameters and normalize design matrix
-    aerodata = airfoil_reader.get_aerodata(design_parameters,geo_folder,airfoil_analysis,mode='train',add_geometry=False)
+    aerodata = airfoil_reader.get_aerodata(design_parameters,geo_folder,airfoil_dzdx_analysis,mode='train',add_geometry=False)
     airfoils = list(aerodata.keys())
     parameters = list(aerodata[airfoils[0]].keys())
 
@@ -148,10 +148,10 @@ def get_design_data(design_parameters, airfoil_analysis, geo_folder):
 
     return airfoils, b, parameters
 
-def get_datasets(case_folder, design_parameters, training_size, img_dims, airfoil_analysis='camber'):
+def get_datasets(case_folder, design_parameters, training_size, img_dims, airfoil_dzdx_analysis=None):
 
     # Read original datasets
-    samples, X = read_dataset(case_folder,airfoil_analysis,dataset_folder='Training',format='png')
+    samples, X = read_dataset(case_folder,airfoil_dzdx_analysis,dataset_folder='Training',format='png')
     # Resize images, if necessary
     X = preprocess_image(X,img_dims)
 
@@ -171,7 +171,7 @@ def get_datasets(case_folder, design_parameters, training_size, img_dims, airfoi
 
     # Get design data and normalize
     geo_folder = os.path.join(case_folder,'Datasets','geometry','originals')
-    airfoils, b, parameters_name = get_design_data(design_parameters,airfoil_analysis,geo_folder)
+    airfoils, b, parameters_name = get_design_data(design_parameters,airfoil_dzdx_analysis,geo_folder)
     scaler = QuantileTransformer().fit(b)  # the data is fit to the whole amount of samples (this can affect training)
     b_norm = scaler.transform(b)
 

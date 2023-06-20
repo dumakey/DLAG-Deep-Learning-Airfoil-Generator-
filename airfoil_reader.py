@@ -18,7 +18,7 @@ design parameters:
 '''
 
 class AirfoilScanner():
-	def __init__(self,coordinates_filepath,parameters):
+	def __init__(self,coordinates_filepath,parameters,airfoil_analysis):
 		self.filepath = coordinates_filepath
 		self.parameter_function_launcher = {
 				'leradius':self.set_leradius,
@@ -32,8 +32,14 @@ class AirfoilScanner():
 				'zle':self.set_zle,
 				'zte':self.set_zte,
 				'xdzdx':self.set_slope_controlpoints,
+				'xdzcdx':self.set_slope_controlpoints,
+				'xdztdx':self.set_slope_controlpoints,
+				'xdzudx':self.set_slope_controlpoints,
+				'xdzldx':self.set_slope_controlpoints,
+
 				}
 		self.parameters = parameters
+		self.airfoil_analysis = airfoil_analysis
 		'''
 		self.parameters = dict.fromkeys(parameters['parameters'])
 		if len(parameters) != 0:
@@ -221,27 +227,27 @@ class AirfoilScanner():
 
 	def set_zmax(self, args):
 
-		xu, zu = args
+		x, z = args
 
-		self.design_parameters['zmax'] = max(zu)
+		self.design_parameters['zmax'] = max(z)
 
 	def set_xzmax(self, args):
 
-		xu, zu = args
+		x, z = args
 
-		self.design_parameters['xzmax'] = xu[np.where(zu == max(zu))][0]
+		self.design_parameters['xzmax'] = x[np.where(z == max(z))][0]
 
 	def set_zmin(self, args):
 
-		xl, zl = args
+		_, z = args
 
-		self.design_parameters['zmin'] = min(zl)
+		self.design_parameters['zmin'] = min(z)
 	
 	def set_xzmin(self, args):
 
-		xl, zl = args
+		x, z = args
 
-		self.design_parameters['xzmin'] = xl[np.where(zl == min(zl))][0]
+		self.design_parameters['xzmin'] = x[np.where(z == min(z))][0]
 
 	def set_zle(self, args):
 
@@ -264,6 +270,104 @@ class AirfoilScanner():
 		elif feature == 'thickness':
 			y = self.zt[1]
 			x = self.x[1]
+		elif feature == 'upper':
+			y = self.zup[1]
+			x = self.xup[1]
+		elif feature == 'lower':
+			y = self.zlow[1]
+			x = self.xlow[1]
+
+		np.seterr(all='ignore')  # Command to ignore possible "division by zero" warnings
+		# Compute first derivative of y w.r.t. x
+		dydx = np.gradient(y,x)
+		# Filter possible "NaN" or "inf" values
+		idx = [i for i in range(len(x)) if math.isinf(dydx[i]) == False and math.isnan(dydx[i]) == False]
+		x = x[idx]
+		dydx = dydx[idx]
+
+		xq = args[1]  # set of controlpoints
+		dzdx =  self.interp1d(x,dydx,xq,'linear')
+
+		ii = 1
+		for item in dzdx:
+			if math.isnan(item) == False:
+				self.design_parameters['dzdx_%s_%s'%(feature,ii)] = item
+				ii += 1
+
+	def set_upper_slope_controlpoints(self, args):
+
+		feature = args[0]
+		y = self.zup[1]
+		x = self.xup[1]
+
+		np.seterr(all='ignore')  # Command to ignore possible "division by zero" warnings
+		# Compute first derivative of y w.r.t. x
+		dydx = np.gradient(y,x)
+		# Filter possible "NaN" or "inf" values
+		idx = [i for i in range(len(x)) if math.isinf(dydx[i]) == False and math.isnan(dydx[i]) == False]
+		x = x[idx]
+		dydx = dydx[idx]
+
+		xc = args[1]  # set of controlpoints
+		dzdx =  self.interp1d(x,dydx,xc,'linear')
+
+		ii = 1
+		for item in dzdx:
+			if math.isnan(item) == False:
+				self.design_parameters['dzdx_%s_%s' %(feature,ii)] = item
+				ii += 1
+
+	def set_lower_slope_controlpoints(self, args):
+
+		feature = args[0]
+		y = self.zlow[1]
+		x = self.xlow[1]
+
+		np.seterr(all='ignore')  # Command to ignore possible "division by zero" warnings
+		# Compute first derivative of y w.r.t. x
+		dydx = np.gradient(y,x)
+		# Filter possible "NaN" or "inf" values
+		idx = [i for i in range(len(x)) if math.isinf(dydx[i]) == False and math.isnan(dydx[i]) == False]
+		x = x[idx]
+		dydx = dydx[idx]
+
+		xc = args[1]  # set of controlpoints
+		dzdx =  self.interp1d(x,dydx,xc,'linear')
+
+		ii = 1
+		for item in dzdx:
+			if math.isnan(item) == False:
+				self.design_parameters['dzdx_%s_%s'%(feature,ii)] = item
+				ii += 1
+
+	def set_camber_slope_controlpoints(self, args):
+
+		feature = args[0]
+		y = self.zc[1]
+		x = self.x[1]
+
+		np.seterr(all='ignore')  # Command to ignore possible "division by zero" warnings
+		# Compute first derivative of y w.r.t. x
+		dydx = np.gradient(y,x)
+		# Filter possible "NaN" or "inf" values
+		idx = [i for i in range(len(x)) if math.isinf(dydx[i]) == False and math.isnan(dydx[i]) == False]
+		x = x[idx]
+		dydx = dydx[idx]
+
+		xc = args[1]  # set of controlpoints
+		dzdx =  self.interp1d(x,dydx,xc,'linear')
+
+		ii = 1
+		for item in dzdx:
+			if math.isnan(item) == False:
+				self.design_parameters['dzdx_%s_%s'%(feature,ii)] = item
+				ii += 1
+
+	def set_thickness_slope_controlpoints(self, args):
+
+		feature = args[0]
+		y = self.zt[1]
+		x = self.x[1]
 
 		np.seterr(all='ignore')  # Command to ignore possible "division by zero" warnings
 		# Compute first derivative of y w.r.t. x
@@ -330,21 +434,34 @@ class AirfoilScanner():
 				fun_args = (self.xup[1], self.zup[1], self.xlow[1], self.zlow[1])
 			elif parameterID == 'xtmax':
 				fun_args = (self.xup[1], self.zup[1], self.xlow[1], self.zlow[1])
-			elif parameterID == 'zmax':
-				fun_args = (self.xup[1], self.zup[1])
-			elif parameterID == 'xzmax':
-				fun_args = (self.xup[1], self.zup[1])
-			elif parameterID == 'zmin':
-				fun_args = (self.xlow[1], self.zlow[1])
-			elif parameterID == 'xzmin':
-				fun_args = (self.xlow[1], self.zlow[1])
-			elif parameterID == 'zle':
-				fun_args = (self.xlow[1],self.zlow[1])
-			elif parameterID == 'zte':
+			elif parameterID in ['zmax','xzmax','zle','zte']:
+				if self.airfoil_analysis == 'camber':
+					x = self.x[1]
+					z = self.zc[1]
+				elif self.airfoil_analysis == 'thickness':
+					x = self.x[1]
+					z = self.zt[1]
+				elif self.airfoil_analysis == 'full':
+					x = self.xup[1]
+					z = self.zup[1]
+				fun_args = (x,z)
+			elif parameterID in ['zmin','xzmin']:
 				fun_args = (self.xlow[1],self.zlow[1])
 			elif parameterID == 'xdzdx':
 				controlpoints = self.parameters['xdzdx']
-				fun_args = (controlpoints)			
+				fun_args = (controlpoints)
+			elif parameterID == 'xdzcdx':
+				controlpoints = self.parameters['xdzcdx']
+				fun_args = (controlpoints)
+			elif parameterID == 'xdztdx':
+				controlpoints = self.parameters['xdztdx']
+				fun_args = (controlpoints)
+			elif parameterID == 'xdzudx':
+				controlpoints = self.parameters['xdzudx']
+				fun_args = (controlpoints)
+			elif parameterID == 'xdzldx':
+				controlpoints = self.parameters['xdzldx']
+				fun_args = (controlpoints)
 
 			self.parameter_function_launcher[parameterID](fun_args)
 
@@ -388,18 +505,25 @@ class AirfoilScanner():
 
 		return np.squeeze(np.array(np.multiply(g, P.T * a)))
 
-def get_aerodata(parameters, geo_folder, airfoil_analysis, mode='train', add_geometry=False, fmt='dat'):
+def get_aerodata(parameters, geo_folder, airfoil_dzdx_analysis=None, mode='train', add_geometry=False, fmt='dat'):
+
+	if airfoil_dzdx_analysis == 'camber':
+		airfoil_analysis = 'camber'
+	elif airfoil_dzdx_analysis == 'thickness':
+		airfoil_analysis = 'thickness'
+	elif airfoil_dzdx_analysis == None:
+		airfoil_analysis = 'full'
 
 	if mode == 'train':
-		if airfoil_analysis == 'camber' or airfoil_analysis == None:
+		if airfoil_dzdx_analysis == 'camber' or airfoil_dzdx_analysis == None:
 			airfoil_fpaths = [os.path.join(geo_folder,file) for file in os.listdir(geo_folder)
 							  if file.endswith(fmt) if not file.endswith('_s%s' % fmt)]
-		elif airfoil_analysis == 'thickness':
+		elif airfoil_dzdx_analysis == 'thickness':
 			airfoil_fpaths = [os.path.join(geo_folder,file) for file in os.listdir(geo_folder) if file.endswith(fmt)]
 
 		airfoil_data = dict()
 		for fpath in airfoil_fpaths:
-			airfoil_scanner = AirfoilScanner(fpath,parameters)
+			airfoil_scanner = AirfoilScanner(fpath,parameters,airfoil_analysis)
 			airfoil_scanner.scan_geometry(return_geometry=False)
 			airfoil_scanner.set_parameters()
 			airfoil_name = airfoil_scanner.name
