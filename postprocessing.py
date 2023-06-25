@@ -254,11 +254,7 @@ def get_mean_contour(img, threshold=200, ylims=None):
 def generate_le(x_open, zu_open, zl_open):
 
     tmax_ratio = (zu_open[0] - zl_open[0])/(max(zu_open) - min(zl_open))
-    if tmax_ratio < 0.1:
-        x_le = 0.85*x_open[0] + 1e-05
-        z_le = -0.5*(zu_open[0] + zl_open[0])
-        i_xumin = i_xlmin = 0
-    else:
+    if tmax_ratio < 0:
         # Computation of chordwise positions where dzdx = 0, searching only in the first half of the airfoil
         N = x_open.size//2
         dzudx = np.gradient(zu_open[:N],x_open[:N])
@@ -267,47 +263,74 @@ def generate_le(x_open, zu_open, zl_open):
         dzldx = np.gradient(zl_open[:N],x_open[:N])
         x_zl_open_max = interp1d(dzldx[:N],x_open[:N],kind='quadratic')(0)
 
-        i_xmax = min(np.where(x_open >= x_zu_open_max)[0][0],np.where(x_open >= x_zl_open_max)[0][0])//2
+        i_xmax = min(np.where(x_open >= x_zu_open_max)[0][0],np.where(x_open >= x_zl_open_max)[0][0])
+        i_xumin = 1
+        i_xlmin = 1
+        x = x_open[0:i_xmax]
+        zu = zu_open[0:i_xmax]
+        zl = zl_open[0:i_xmax]
+
+        x_le = interp1d(zu-zl,x)(0)
+        z_le = interp1d(x,zu,fill_value='extrapolate')(x_le)
+    elif tmax_ratio > 0 and tmax_ratio < 0.1:
+        x_le = 0.85*x_open[0] + 1e-05
+        z_le = 0.5*(zu_open[0] + zl_open[0])
+        i_xumin = i_xlmin = 0
+    else:
+        # Computation of chordwise positions where dzdx = 0, searching only in the first half of the airfoil
+        N = x_open.size//2
+        dzudx = np.gradient(zu_open[:N],x_open[:N])
+        x_zu_open_max = interp1d(dzudx[:N],x_open[:N],fill_value='extrapolate')(0)
+
+        dzldx = np.gradient(zl_open[:N],x_open[:N])
+        x_zl_open_max = interp1d(dzldx[:N],x_open[:N],fill_value='extrapolate')(0)
+
+        i_xmax = min(np.where(x_open >= x_zu_open_max)[0][0],np.where(x_open >= x_zl_open_max)[0][0])
+        if i_xmax == 0:
+            i_xmax = N//2
         i_xumin = 2
         i_xlmin = 2
         # Construct x and z coordinates range
         x = np.concatenate((np.flipud(x_open[i_xumin:i_xmax]),x_open[i_xlmin:i_xmax]))
-        z = np.concatenate((-np.flipud(zu_open[i_xumin:i_xmax]),np.flipud(zl_open[i_xlmin:i_xmax])))
+        z = np.concatenate((-np.flipud(zu_open[i_xumin:i_xmax]),-zl_open[i_xlmin:i_xmax]))
 
         # 1. Intersection of upper-lower curves
         i_z1 = i_xmax - i_xumin - 1
         i_z2 = i_z1 + 1
-        zmax = 100*z[i_z2]
+        if z[i_z2] < 0:
+            zmax = 0
+        else:
+            zmax = 10*z[i_z2]
         if z[-1] < z[-2]:
             zmin = z[-1]
         else:
             zmin = z[0]
-        z_int = np.linspace(zmin,zmax,30)
-        xu_int = interp1d(z[0:i_z1],x[0:i_z1],kind='quadratic',fill_value='extrapolate')(z_int)
-        xl_int = interp1d(z[i_z2:],x[i_z2:],kind='quadratic',fill_value='extrapolate')(z_int)
+        z_int = np.linspace(zmin,zmax)
+        xu_int = interp1d(z[0:i_z1],x[0:i_z1],fill_value='extrapolate')(z_int)
+        xl_int = interp1d(z[i_z2:],x[i_z2:],fill_value='extrapolate')(z_int)
 
         # 2. Compute intersection
-        z_inter = interp1d(xu_int-xl_int,z_int,kind='quadratic',fill_value='extrapolate')(0)
-        x_inter = interp1d(z_int,xu_int,kind='quadratic',fill_value='extrapolate')(z_inter)
+        z_inter = interp1d(xu_int-xl_int,z_int,fill_value='extrapolate')(0)
+        x_inter = interp1d(z_int,xu_int,fill_value='extrapolate')(z_inter)
 
         # 3. Bisector vector
         dxudz_int = np.gradient(xu_int,z_int)
         dxldz_int = np.gradient(xl_int,z_int)
-        dxudz_inter = interp1d(z_int,dxudz_int,kind='quadratic',fill_value='extrapolate')(z_inter)
-        dxldz_inter = interp1d(z_int,dxldz_int,kind='quadratic',fill_value='extrapolate')(z_inter)
+        dxudz_inter = interp1d(z_int,dxudz_int,fill_value='extrapolate')(z_inter)
+        dxldz_inter = interp1d(z_int,dxldz_int,fill_value='extrapolate')(z_inter)
 
         z1 = z_inter
         x1 = x_inter
-        dz = z_int[1] - z_int[0]
-        if z[-1] < z[-2]:
-            z2 = z1 - dz
-            dxudz_inter = -dxudz_inter
+        dz = z[1] - z[0]
+        z2 = z1 - dz
+        if all(dxldz_int < 0):
+            z3 = z2
             dxldz_inter = -dxldz_inter
         else:
-            z2 = z1 + dz
-        x2 = x1 + dxudz_inter*dz
+            z2 = z1 - dz
+            z3 = z1 + dz
+        x2 = x1 - dxudz_inter*dz
         x3 = x1 + dxldz_inter*dz
-        z3 = z2
 
         a = np.array([z2-z1,x2-x1])
         b = np.array([z3-z1,x3-x1])
@@ -320,59 +343,37 @@ def generate_le(x_open, zu_open, zl_open):
         N = 30
         chord_ul_z = np.linspace(z[i_z1],z[i_z2],N)
         chord_ul_x = np.linspace(x[i_z1],x[i_z2],N)
-        bisector_x = interp1d([z1,z4],[x1,x4],kind='linear',fill_value='extrapolate')(chord_ul_z)
-        bisector_z = interp1d([x1,x4],[z1,z4],kind='linear',fill_value='extrapolate')(bisector_x)
-        z5 = interp1d(bisector_x-chord_ul_x,chord_ul_z,kind='quadratic',fill_value='extrapolate')(0)
-        x5 = interp1d(bisector_z,bisector_x,kind='quadratic',fill_value='extrapolate')(z5)
+        bisector_x = interp1d([z1,z4],[x1,x4],fill_value='extrapolate')(chord_ul_z)
+        bisector_z = interp1d([x1,x4],[z1,z4],fill_value='extrapolate')(bisector_x)
+        z5 = interp1d(bisector_x-chord_ul_x,chord_ul_z,fill_value='extrapolate')(0)
+        x5 = interp1d(bisector_z,bisector_x,fill_value='extrapolate')(z5)
 
         # 5. Compute leading edge point
         z_le = 0.5 * (z1 + z5)
-        x_le = interp1d([z1,z5],[x1,x5],kind='linear',fill_value='extrapolate')(z_le)
+        x_le = interp1d([z1,z5],[x1,x5],fill_value='extrapolate')(z_le)
+        z_le = -z_le
         '''
         plt.figure()
         plt.scatter(z,x,color='b',label='base points')
         plt.plot(z_int,xu_int,color='r')
         plt.plot(z_int,xl_int,color='g')
-        plt.scatter(z[i_z1],x[i_z1],color='r',label='P1')
-        plt.scatter(z[i_z2],x[i_z2],color='r',label='P2')
-        plt.scatter(z_le,x_le,color='g',label='PLE')
+        plt.scatter(z1,x1,color='m',label='inter')
+        plt.scatter(z[i_z1],x[i_z1],color='r',label='z1')
+        plt.scatter(z[i_z2],x[i_z2],color='r',label='z2')
+        plt.scatter(z2,x2,color='y',label='P2')
+        plt.scatter(z3,x3,color='g',label='P3')
+        plt.scatter(-z_le,x_le,color='c',label='PLE')
         plt.xlabel('z')
         plt.ylabel('x')
-        plt.xlim(-0.8*zu_open[i_xmax],1.3*z_inter)
-        plt.ylim(0.8*x_inter,1.1*x_open[i_xmax])
         plt.legend()
         plt.show(block=True)
         '''
     # Generate new upper and lower sides
-    '''
-    xu_round_1 = np.linspace(x_le,x_open[i_xumin],i_xmax-i_xumin)
-    xu_round_2 = x_open[i_xumin+1:]
-    xu_round = np.concatenate((xu_round_1,xu_round_2))
-    zu_round_1 = interp1d(x_open,zu_open,kind='quadratic',fill_value='extrapolate')(xu_round_1)
-    zu_round_2 = zu_open[i_xumin+1:]
-    zu_round = np.concatenate((zu_round_1,zu_round_2))
-
-    xl_round_1 = np.linspace(x_le,x_open[i_xlmin],i_xmax-i_xlmin)
-    xl_round_2 = x_open[i_xlmin+1:]
-    xl_round = np.concatenate((xl_round_1,xl_round_2))
-    zl_round_1 = interp1d(x_open,zl_open,kind='quadratic',fill_value='extrapolate')(xl_round_1)
-    zl_round_2 = zl_open[i_xlmin+1:]
-    zl_round = np.concatenate((zl_round_1,zl_round_2))
-    '''
     xu_round = np.concatenate((np.array([x_le]),x_open[i_xumin:]))
-    zu_round = np.concatenate((np.array([-z_le]),zu_open[i_xumin:]))
+    zu_round = np.concatenate((np.array([z_le]),zu_open[i_xumin:]))
     xl_round = np.concatenate((np.array([x_le]),x_open[i_xlmin:]))
-    zl_round = np.concatenate((np.array([-z_le]),zl_open[i_xlmin:]))
-    '''
-    plt.figure()
-    plt.plot(xu_round,zu_round,color='b',label='Round')
-    plt.plot(xl_round,zl_round,color='b',label='Round')
-    plt.scatter(x_le,-z_le,color='g')
-    plt.xlabel('z')
-    plt.ylabel('x')
-    plt.legend()
-    plt.show(block=True)
-    '''
+    zl_round = np.concatenate((np.array([z_le]),zl_open[i_xlmin:]))
+
     return xu_round, zu_round, xl_round, zl_round
 
 def generate_te(xu_open, zu_open, xl_open, zl_open):
@@ -385,7 +386,11 @@ def generate_te(xu_open, zu_open, xl_open, zl_open):
 
     # Compute intersection
     x_te = interp1d(zu_int-zl_int,x_int,fill_value='extrapolate')(0)
-    z_te = interp1d(x_int,zu_int,fill_value='extrapolate')(x_te)
+    if x_te > xmin and x_te < xmax:
+        z_te = interp1d(x_int,zu_int,fill_value='extrapolate')(x_te)
+    else:
+        x_te = xmin
+        z_te = 0.5*(zu_open[-1] + zl_open[-1])
 
     # Concatenate
     xu_closed = np.concatenate((xu_open,np.array([x_te])))

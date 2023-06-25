@@ -189,7 +189,7 @@ class CGenTrainer:
         design_parameters_on_launcher = self.parameters.design_parameters_des
         bcheck = set([True if item in design_parameters_on_logfile else False
                       for item in self.parameters.design_parameters_des.keys() if not item.startswith('dzdx')])
-        if bcheck != {True}: # if not all design parameters are included in the (design) parameters used for training
+        if bcheck == {False}: # if not all design parameters are included in the (design) parameters used for training
             self.parameters.design_parameters_des = OrderedDict(casedata.design_parameters_train)
             # delete the parameter corresponding to the specification of the slope controlpoints x-loc
             if 'dzdx' in self.parameters.design_parameters_des:
@@ -262,6 +262,7 @@ class CGenTrainer:
         samples_fname = [file for file in os.listdir(os.path.join(samples_dir,'camber'))]
         for sample in samples_fname:
             # Airfoil name
+            #print(sample)
             airfoil = sample.replace('.png','')
 
             # Read airfoil camber contour from image
@@ -339,13 +340,14 @@ class CGenTrainer:
 
             # Read airfoil geometry and extract features
             features = [
-            'leradius','teangle','tmax','xtmax','zmax','xzmax','zmin','xzmin','zle','zte','xdzcdx','xdztdx','xdzudx','xdzldx',
+            'leradius','teangle','tmax','xtmax','zmax','xzmax','zmin','xzmin','zle','zte',
             ]
             features = dict.fromkeys(features,None)
-            features['xdzcdx'] = ('camber',design_parameters['xdzdx'][1])
-            features['xdztdx'] = ('thickness',design_parameters['xdzdx'][1])
-            features['xdzudx'] = ('upper',design_parameters['xdzdx'][1])
-            features['xdzldx'] = ('lower',design_parameters['xdzdx'][1])
+            if 'xdzdx' in design_parameters.keys():
+                features['xdzcdx'] = ('camber',design_parameters['xdzdx'][1])
+                features['xdztdx'] = ('thickness',design_parameters['xdzdx'][1])
+                features['xdzudx'] = ('upper',design_parameters['xdzdx'][1])
+                features['xdzldx'] = ('lower',design_parameters['xdzdx'][1])
 
             airfoil_scanner = airfoil_reader.AirfoilScanner(os.path.join(storage_dir,geo_airfoil_fname),features,airfoil_analysis='full')
             airfoil_scanner.scan_geometry(return_geometry=False)
