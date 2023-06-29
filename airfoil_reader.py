@@ -212,18 +212,12 @@ class AirfoilScanner():
 
 	def set_teangle(self, args):
 
-		xu, zu, xl, zl = args
+		x, z = args
 
-		dzudx = np.gradient(zu,xu)
-		dzldx = np.gradient(zl,xl)
+		dzdx = np.gradient(z,x)
+		Theta = math.atan(dzdx[-1])
 
-		#Thetau = math.degrees(math.atan(dzudx[-1]))
-		#Thetal = math.degrees(math.atan(dzldx[-1]))
-
-		Thetau = math.atan(dzudx[-1])
-		Thetal = math.atan(dzldx[-1])
-
-		self.design_parameters['teangle'] = abs(Thetau - Thetal)
+		self.design_parameters['teangle'] = abs(Theta)
 
 	def set_zmax(self, args):
 
@@ -428,13 +422,11 @@ class AirfoilScanner():
 		for parameterID in self.parameters.keys():
 			if parameterID == 'leradius':
 				fun_args = (self.xup[1], self.zup[1], self.xlow[1], self.zlow[1])
-			elif parameterID == 'teangle':
-				fun_args = (self.xup[1], self.zup[1], self.xlow[1], self.zlow[1])
 			elif parameterID == 'tmax':
 				fun_args = (self.xup[1], self.zup[1], self.xlow[1], self.zlow[1])
 			elif parameterID == 'xtmax':
 				fun_args = (self.xup[1], self.zup[1], self.xlow[1], self.zlow[1])
-			elif parameterID in ['zmax','xzmax','zle','zte']:
+			elif parameterID in ['teangle','zmax','xzmax','zle','zte']:
 				if self.airfoil_analysis == 'camber':
 					x = self.x[1]
 					z = self.zc[1]

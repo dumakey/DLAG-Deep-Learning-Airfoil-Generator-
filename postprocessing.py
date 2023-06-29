@@ -2,6 +2,7 @@ import os
 import numpy as np
 import cv2 as cv
 from matplotlib import pyplot as plt
+plt.ioff()
 from random import randint
 from scipy.interpolate import interp1d
 from scipy.optimize import fsolve
@@ -285,11 +286,14 @@ def generate_le(x_open, zu_open, zl_open):
         dzldx = np.gradient(zl_open[:N],x_open[:N])
         x_zl_open_max = interp1d(dzldx[:N],x_open[:N],fill_value='extrapolate')(0)
 
+        i_xumin = 2
+        i_xlmin = 2
         i_xmax = min(np.where(x_open >= x_zu_open_max)[0][0],np.where(x_open >= x_zl_open_max)[0][0])
         if i_xmax == 0:
             i_xmax = N//2
-        i_xumin = 2
-        i_xlmin = 2
+        elif (i_xmax - i_xumin < 3) or (i_xmax - i_xlmin < 3):
+            i_xmax = 5
+
         # Construct x and z coordinates range
         x = np.concatenate((np.flipud(x_open[i_xumin:i_xmax]),x_open[i_xlmin:i_xmax]))
         z = np.concatenate((-np.flipud(zu_open[i_xumin:i_xmax]),-zl_open[i_xlmin:i_xmax]))

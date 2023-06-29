@@ -187,13 +187,13 @@ class CGenTrainer:
         casedata = reader.read_case_logfile(os.path.join(self.case_dir,'Results','pretrained_model','DLAG.log'))
         design_parameters_on_logfile = [item for item in casedata.design_parameters_train.keys() if item != 'xdzdx']  # exclude (training) slope controlpoints x-locations
         design_parameters_on_launcher = self.parameters.design_parameters_des
-        bcheck = set([True if item in design_parameters_on_logfile else False
-                      for item in self.parameters.design_parameters_des.keys() if not item.startswith('dzdx')])
+        bcheck = set([True if k in design_parameters_on_logfile else False
+                      for k,v in self.parameters.design_parameters_des.items() if not k.startswith('dzdx') if v != None])
         if bcheck == {False}: # if not all design parameters are included in the (design) parameters used for training
             self.parameters.design_parameters_des = OrderedDict(casedata.design_parameters_train)
             # delete the parameter corresponding to the specification of the slope controlpoints x-loc
-            if 'dzdx' in self.parameters.design_parameters_des:
-                del self.parameters.design_parameters_des['dzdx']
+            if 'xdzdx' in self.parameters.design_parameters_des:
+                del self.parameters.design_parameters_des['xdzdx']
             # Assign the specified design parameters to the "available" training design parameters
             for parameter, value in design_parameters_on_launcher.items():
                 if parameter in self.parameters.design_parameters_des.keys():
@@ -215,6 +215,13 @@ class CGenTrainer:
                 self.parameters.design_parameters_des['dzdx'] = ('thickness',design_parameters_on_launcher['dzdx_t'])
                 del self.parameters.design_parameters_des['dzdx_t']
         casedata.design_parameters_des = self.parameters.design_parameters_des.copy()
+        # Create new dictionary of parameters, used for computing the scaler that will normalize the inputs
+        casedata.design_parameters_train_new = casedata.design_parameters_des.copy()
+        if 'dzdx' in casedata.design_parameters_train_new.keys():
+            del casedata.design_parameters_train_new['dzdx']
+        casedata.design_parameters_train_new.update(casedata.design_parameters_train)
+        casedata.design_parameters_train = casedata.design_parameters_train_new.copy()
+        del casedata.design_parameters_train_new
 
         # Read parameters
         case_dir = self.case_dir
@@ -632,31 +639,30 @@ class CGenTrainer:
 
     def generate_samples(self, parameters, storage_dir):
 
-        def build_design_vector(parameters, case_folder):
+        def build_design_vector(parameters, case_folder, scaler=None):
 
             if 'dzdx' in parameters.design_parameters_des.keys():
-                n_dpar = len(parameters.design_parameters_des.keys()) - 1 + len(parameters.design_parameters_des['dzdx'][-1])
+                n_dpar = 8 + len(parameters.design_parameters_des['dzdx'][-1])
             else:
-                n_dpar = len(parameters.design_parameters_des.keys())
+                n_dpar = 8
             b = np.zeros((n_dpar,))
             i = 0
-            for parameter, value in parameters.design_parameters_des.items():
-                if parameter != 'dzdx':
+            for parameter,value in parameters.design_parameters_des.items():
+                if value != None and parameter != 'dzdx':
                     b[i] = value
                     i += 1
-                else:
-                    for dzdx in value[1]:
-                        b[i] = dzdx
-                        i += 1
+                elif parameter == 'dzdx':
+                    N = len(value[1])
+                    b[i:i+N] = value[1]
+                    i += N
+                elif value == None:
+                    i += 1
 
             # Normalize vector
-            if 'dzdx' in parameters.design_parameters_des.keys():
-                airfoil_dzdx_analysis = parameters.design_parameters_des['dzdx'][0]
-            else:
-                airfoil_dzdx_analysis = None
-            _, b_tr, _ = dataset_processing.get_design_data(parameters.design_parameters_train,airfoil_dzdx_analysis,case_folder)
-            scaler = QuantileTransformer().fit(b_tr)  # the data is fit to the whole amount of samples (this can affect training)
-            b_norm = scaler.transform(np.expand_dims(b,axis=0))
+            b_norm = scaler.transform(np.expand_dims(b,axis=0))  # scaling
+            # Some positions of the array must be reset to 0 because they have been modified by the scaling
+            zero_values_idx = [i for i in range(n_dpar) if b[i] == 0]  # get indexes to reset to 0
+            b_norm[0,zero_values_idx] = 0
 
             return tf.convert_to_tensor(b_norm)
 
@@ -670,9 +676,9 @@ class CGenTrainer:
         batch_size = parameters.training_parameters['batch_size']
         n_samples = self.parameters.samples_generation['n_samples']
         if 'dzdx' in parameters.design_parameters_des.keys():
-            n_dpar = len(parameters.design_parameters_des.keys()) - 1 + len(parameters.design_parameters_des['dzdx'][-1])
+            n_dpar = 8 + len(parameters.design_parameters_des['dzdx'][-1])
         else:
-            n_dpar = len(parameters.design_parameters_des.keys())
+            n_dpar = 8
 
         decoder = models.VAEC(output_dim,n_dpar,latent_dim,[],dec_hidden_layers,alpha,0.0,0.0,0.0,activation,'sample')  # No regularization
 
@@ -696,12 +702,21 @@ class CGenTrainer:
 
             ## Sample images ##
             geometry_folder = os.path.join(self.case_dir,'Datasets','geometry','originals')
+
+            # If a standardization is applied to the design parameter array, get the scaler first
+            if 'dzdx' in parameters.design_parameters_des.keys():
+                airfoil_dzdx_analysis = parameters.design_parameters_des['dzdx'][0]
+            else:
+                airfoil_dzdx_analysis = None
+            _, b_tr, _ = dataset_processing.get_design_data(parameters.design_parameters_train,airfoil_dzdx_analysis,geometry_folder)
+            scaler = QuantileTransformer().fit(b_tr) # the data is fit to the whole amount of samples (this can affect training)
+
             samples = np.zeros([n_samples,np.prod(output_dim)])
             latent_vectors = np.zeros((latent_dim,n_samples))
             for i in range(n_samples):
                 t = tf.random.normal(shape=(1,latent_dim))
                 latent_vectors[:,i] = latent_model.predict(t,steps=1)
-                b_des = build_design_vector(parameters,geometry_folder)
+                b_des = build_design_vector(parameters,geometry_folder,scaler)
                 samples[i,:] = decoder.predict([t,b_des],steps=1)
             X_samples.append(samples)
 
@@ -719,23 +734,25 @@ class CGenTrainer:
                 n_dpar = len(parameters.design_parameters_des.keys()) - 1 + len(parameters.design_parameters_des['dzdx'][-1])
             else:
                 n_dpar = len(parameters.design_parameters_des.keys())
+
             b = np.zeros((n_dpar,))
             i = 0
-            for parameter, value in parameters.design_parameters_des.items():
-                if parameter != 'dzdx':
+            for parameter,value in parameters.design_parameters_des.items():
+                if value != None and parameter != 'dzdx':
                     b[i] = value
                     i += 1
-                else:
-                    for dzdx in value[1]:
-                        b[i] = dzdx
-                        i += 1
+                elif parameter == 'dzdx':
+                    N = len(value[1])
+                    b[i:i+N] = value[1]
+                    i += N
+                elif value == None:
+                    i += 1
 
             # Normalize vector
-            if 'dzdx' in parameters.design_parameters_des.keys():
-                airfoil_analysis = parameters.design_parameters_des['dzdx'][0]
-            _, b_tr, _ = dataset_processing.get_design_data(parameters.design_parameters_train,airfoil_analysis,case_folder)
-            scaler = QuantileTransformer().fit(b_tr)  # the data is fit to the whole amount of samples (this can affect training)
-            b_norm = scaler.transform(np.expand_dims(b,axis=0))
+            b_norm = scaler.transform(np.expand_dims(b,axis=0))  # scaling
+            # Some positions of the array must be reset to 0 because they have been modified by the scaling
+            zero_values_idx = [i for i in range(n_dpar) if b[i] == 0]  # get indexes to reset to 0
+            b_norm[0,zero_values_idx] = 0
 
             return tf.convert_to_tensor(b_norm)
 
@@ -775,7 +792,16 @@ class CGenTrainer:
             ## Sample image ##
             geometry_folder = os.path.join(self.case_dir,'Datasets','geometry','originals')
             t = tf.random.normal(shape=(1,latent_dim))  # generate latent vector (tensor)
-            b_des = build_design_vector(parameters,geometry_folder)  # compute design vector to impose on generation
+
+            # If a standardization is applied to the design parameter array, get the scaler first
+            if 'dzdx' in parameters.design_parameters_des.keys():
+                airfoil_dzdx_analysis = parameters.design_parameters_des['dzdx'][0]
+            else:
+                airfoil_dzdx_analysis = None
+            _, b_tr, _ = dataset_processing.get_design_data(parameters.design_parameters_train,airfoil_dzdx_analysis,geometry_folder)
+            scaler = QuantileTransformer().fit(b_tr) # the data is fit to the whole amount of samples (this can affect training)
+
+            b_des = build_design_vector(parameters,geometry_folder,scaler)  # compute design vector to impose on generation
             N = len(variational_space)
             samples = np.zeros([latent_dim,N,np.prod(output_dim)])
             t_arr = latent_model.predict(t,steps=1)  # retrieve latent vector as an array
@@ -978,7 +1004,8 @@ class CGenTrainer:
             training['METRICS'] = [model.metrics_names[-1] if model.metrics_names != None else None for model in model.Model]
 
             design = OrderedDict()
-            design['DESIGN PARAMETERS TRAIN'] = [item.upper() for item in parameters.design_parameters_train.keys() if item != 'xdzdx']
+            design['DESIGN PARAMETERS TRAIN'] = [item.upper() for item in parameters.design_parameters_train.keys()
+                                                 if item != 'xdzdx' if parameters.design_parameters_train[item] == 1]
             if 'xdzdx' in parameters.design_parameters_train.keys():
                 design['DESIGN PARAMETERS TRAIN'].append('XDZDX_C' if parameters.analysis['airfoil_dzdx_analysis'] == 'camber' else 'XDZDX_T')
                 design['XDZDX CONTROLPOINTS TRAIN'] = parameters.design_parameters_train['xdzdx'][-1]

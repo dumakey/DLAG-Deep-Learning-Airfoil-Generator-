@@ -123,13 +123,25 @@ def plot_dataset(dataset_folder, fpaths, dataset_type='Originals'):
         fig.savefig(os.path.join(plots_folder,'full_airfoil',name),dpi=200,bbox_inches='tight',pad_inches=0)
         plt.close()
 
-def get_design_dataset(samples, X, airfoil_data):
+def get_design_dataset(samples, X, airfoil_data, design_parameters):
 
     r = X.shape[0]  # number of samples and dimension of samples in the dataset provided
     s = len(airfoil_data[samples[0]].values()) # get size of design vector
     b = np.zeros([r,s],dtype='float')
+
+    # Retrieve indexes of the design parameters to take
+    idx = []
+    for i,v in enumerate(design_parameters.values()):
+        if v == 1:
+            idx.append(i)
+        if type(v) == tuple:
+            idx = idx + [i+ii for ii in range(len(v[1]))]
+
+    # Build design parameters array
     for i,sample in enumerate(samples):
-        b[i,:] = list(airfoil_data[sample].values())
+        airfoil_parameters = list(airfoil_data[sample].values())
+        for j in idx:
+            b[i,j] = airfoil_parameters[j]
 
     return b
 
@@ -141,7 +153,10 @@ def get_design_data(design_parameters, airfoil_dzdx_analysis, geo_folder):
     parameters = list(aerodata[airfoils[0]].keys())
 
     r = len(aerodata)  # number of total (training + validation) samples
-    s = len(aerodata[airfoils[0]].keys()) # get size of design vector
+    if 'xdzdx' in design_parameters.keys():
+        s = 8 + len(design_parameters['xdzdx'][1]) # get size of design vector
+    else:
+        s = 8
     b = np.zeros([r,s],dtype='float64')
     for j,airfoil in enumerate(aerodata.values()):
         b[j,:] = list(airfoil.values())
@@ -157,13 +172,19 @@ def get_datasets(case_folder, design_parameters, training_size, img_dims, airfoi
 
     # Read dataset images 
     samples_train, samples_val = train_test_split(samples,train_size=training_size,shuffle=True)
-    samples_train_mask = [True if sample in samples_train else False for sample in samples]
+    samples_train = [sample for sample in samples if not sample in samples_val]
+    samples_val = [sample for sample in samples if not sample in samples_train]
+
+    samples_train_mask = [True if not sample in samples_val else False for sample in samples]
     X_train = X[samples_train_mask]
-    samples_val_mask = [True if sample in samples_val else False for sample in samples]
+    samples_val_mask = [True if not sample in samples_train else False for sample in samples]
     X_val = X[samples_val_mask]
 
     # Split validation set into cross-validation set and test set
     samples_cv, samples_test = train_test_split(samples_val,train_size=0.75,shuffle=True)
+    samples_cv = [sample for sample in samples_val if not sample in samples_test]
+    samples_test = [sample for sample in samples_val if not sample in samples_cv]
+
     samples_cv_mask = [True if sample in samples_cv else False for sample in samples_val]
     X_cv = X_val[samples_cv_mask]
     samples_test_mask = [True if sample in samples_test else False for sample in samples_val]
@@ -181,8 +202,8 @@ def get_datasets(case_folder, design_parameters, training_size, img_dims, airfoi
         aerodata_norm[airfoil] = OrderedDict(zip(parameters_name,b_norm[j,:]))
 
     # Get design dataset
-    b_train = get_design_dataset(samples_train,X_train,aerodata_norm)
-    b_cv = get_design_dataset(samples_cv,X_cv,aerodata_norm)
-    b_test = get_design_dataset(samples_test,X_test,aerodata_norm)
+    b_train = get_design_dataset(samples_train,X_train,aerodata_norm,design_parameters)
+    b_cv = get_design_dataset(samples_cv,X_cv,aerodata_norm,design_parameters)
+    b_test = get_design_dataset(samples_test,X_test,aerodata_norm,design_parameters)
 
     return samples_train, X_train, b_train, samples_cv, X_cv, b_cv, samples_test, X_test, b_cv

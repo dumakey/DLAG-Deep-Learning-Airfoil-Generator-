@@ -176,28 +176,31 @@ def read_case_setup(launch_filepath):
 
     # Design parameters (training)
     match = re.search('DPARAMETERS_TRAIN\s*=\s*\(\s*LERADIUS\s*\,\s*(\d)\s*\,\s*TEANGLE\s*\,\s*(\d)\s*\,'
-                      '\s*TMAX\s*\,\s*(\d)\s*\,\s*ZMAX\s*\,\s*(\d)\s*\,\s*ZMIN\s*\,\s*(\d)\s*\,\s*ZLE\s*\,\s*(\d)\s*\,'
-                      '\s*ZTE\s*\,\s*(\d)\s*\,\s*DZDX_C\s*\,\s*(\d)\s*\,\s*DZDX_T\s*\,\s*(\d)\s*\).*',data)
+                      '\s*ZMAX\s*\,\s*(\d)\s*\,\s*XZMAX\s*\,\s*(\d)\s*\,\s*ZMIN\s*\,\s*(\d)\s*\,\s*XZMIN\s*\,\s*(\d)\s*\,'
+                      '\s*ZLE\s*\,\s*(\d)\s*\,\s*ZTE\s*\,\s*(\d)\s*\,\s*DZDX_C\s*\,\s*(\d)\s*\,\s*DZDX_T\s*\,\s*(\d)\s*\).*',data)
     if match:
-        casedata.design_parameters_train['parameters'] = []
+        casedata.design_parameters_train['parameters'] = dict.fromkeys(['leradius','teangle','zmax','xzmax','zmin','xzmin',
+                                                                        'zle','zte'],None)
         if match.group(1) == '1':
-            casedata.design_parameters_train['parameters'].append('leradius')
+            casedata.design_parameters_train['parameters']['leradius'] = 1
         if match.group(2) == '1':
-            casedata.design_parameters_train['parameters'].append('teangle')
+            casedata.design_parameters_train['parameters']['teangle'] = 1
         if match.group(3) == '1':
-            casedata.design_parameters_train['parameters'].append('tmax')
+            casedata.design_parameters_train['parameters']['zmax'] = 1
         if match.group(4) == '1':
-            casedata.design_parameters_train['parameters'].append('zmax')
+            casedata.design_parameters_train['parameters']['xzmax'] = 1
         if match.group(5) == '1':
-            casedata.design_parameters_train['parameters'].append('zmin')
+            casedata.design_parameters_train['parameters']['zmin'] = 1
         if match.group(6) == '1':
-            casedata.design_parameters_train['parameters'].append('zle')
+            casedata.design_parameters_train['parameters']['xzmin'] = 1
         if match.group(7) == '1':
-            casedata.design_parameters_train['parameters'].append('zte')
+            casedata.design_parameters_train['parameters']['zle'] = 1
         if match.group(8) == '1':
-            casedata.design_parameters_train['parameters'].append('dzdx_c')
+            casedata.design_parameters_train['parameters']['zte'] = 1
         if match.group(9) == '1':
-            casedata.design_parameters_train['parameters'].append('dzdx_t')
+            casedata.design_parameters_train['parameters']['dzdx_c'] = 1
+        if match.group(10) == '1':
+            casedata.design_parameters_train['parameters']['dzdx_t'] = 1
 
     # DZDX controlpoints (training)
     match = re.search('XDZDX_CP_TRAIN\s*=\s*(.*|NONE)', data)
@@ -209,7 +212,7 @@ def read_case_setup(launch_filepath):
             casedata.design_parameters_train['xdzdx_cp'] = None
 
     # Slope design parameters standardisation (training)
-    casedata.design_parameters_train_std = dict.fromkeys(casedata.design_parameters_train['parameters'])
+    casedata.design_parameters_train_std = dict.copy(casedata.design_parameters_train['parameters'])
     if casedata.design_parameters_train['xdzdx_cp'] != None:
         if 'dzdx_c' in casedata.design_parameters_train_std:
             del casedata.design_parameters_train_std['dzdx_c']
@@ -222,27 +225,30 @@ def read_case_setup(launch_filepath):
 
     # Design parameters (generation)
     match = re.search('DPARAMETERS_DES\s*=\s*\(\s*LERADIUS\s*\,\s*(.*|NONE)\s*\,\s*TEANGLE\s*\,\s*(.*|NONE)\s*\,'
-                      '\s*TMAX\s*\,\s*(.*|NONE)\s*\,\s*ZMAX\s*\,\s*(.*|NONE)\s*\,\s*ZMIN\s*\,\s*(.*|NONE)\s*\,'
-                      '\s*ZLE\s*\,\s*(.*|NONE)\s*\,\s*ZTE\s*\,\s*(.*|NONE)\s*\,\s*DZDX_U\s*\,\s*\(*(.*|NONE)\s*\)*\s*\,'
-                      '\s*DZDX_L\s*\,\s*\(*(.*|NONE)\)*\s*\).*', data)
+                      '\s*ZMAX\s*\,\s*(.*|NONE)\s*\,\s*XZMAX\s*\,\s*(.*|NONE)\s*\,\s*ZMIN\s*\,\s*(.*|NONE)\s*\,'
+                      '\s*XZMIN\s*\,\s*(.*|NONE)\s*\,\s*ZLE\s*\,\s*(.*|NONE)\s*\,\s*ZTE\s*\,\s*(.*|NONE)\s*\,'
+                      '\s*DZDX_U\s*\,\s*\(*(.*|NONE)\s*\)*\s*\,\s*DZDX_L\s*\,\s*\(*(.*|NONE)\)*\s*\).*', data)
     if match:
+        casedata.design_parameters_des = dict.fromkeys(['leradius','teangle','zmax','xzmax','zmin','xzmin','zle','zte'],None)
         if match.group(1) != 'NONE':
             casedata.design_parameters_des['leradius'] = float(match.group(1))
         if match.group(2) != 'NONE':
             casedata.design_parameters_des['teangle'] = math.radians(float(match.group(2)))
         if match.group(3) != 'NONE':
-            casedata.design_parameters_des['tmax'] = float(match.group(3))
+            casedata.design_parameters_des['zmax'] = float(match.group(3))
         if match.group(4) != 'NONE':
-            casedata.design_parameters_des['zmax'] = float(match.group(4))
+            casedata.design_parameters_des['xzmax'] = float(match.group(4))
         if match.group(5) != 'NONE':
-            casedata.design_parameters_des['zmin'] = float(match.group(5))
+            casedata.design_parameters_des['zmin'] = float(match.group(4))
         if match.group(6) != 'NONE':
-            casedata.design_parameters_des['zle'] = float(match.group(6))
+            casedata.design_parameters_des['xzmin'] = float(match.group(4))
         if match.group(7) != 'NONE':
-            casedata.design_parameters_des['zte'] = float(match.group(7))
-        if match.group(8) != 'NONE' and match.group(9) != 'NONE':
-            dzdx_u_matches = [float(item) for item in re.findall('(\-*\d+\.*\d+)', match.group(8))]
-            dzdx_l_matches = [float(item) for item in re.findall('(\-*\d+\.*\d+)', match.group(9))]
+            casedata.design_parameters_des['zle'] = float(match.group(5))
+        if match.group(8) != 'NONE':
+            casedata.design_parameters_des['zte'] = float(match.group(6))
+        if match.group(9) != 'NONE' and match.group(10) != 'NONE':
+            dzdx_u_matches = [float(item) for item in re.findall('(\-*\d+\.*\d+)', match.group(9))]
+            dzdx_l_matches = [float(item) for item in re.findall('(\-*\d+\.*\d+)', match.group(10))]
             
             Npoints = len(dzdx_u_matches)
             if casedata.analysis['airfoil_dzdx_analysis_des'] == 'camber':
