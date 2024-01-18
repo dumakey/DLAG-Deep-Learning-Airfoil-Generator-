@@ -206,4 +206,4 @@ def get_datasets(case_folder, design_parameters, training_size, img_dims, airfoi
     b_cv = get_design_dataset(samples_cv,X_cv,aerodata_norm,design_parameters)
     b_test = get_design_dataset(samples_test,X_test,aerodata_norm,design_parameters)
 
-    return samples_train, X_train, b_train, samples_cv, X_cv, b_cv, samples_test, X_test, b_cv
+    return samples_train, X_train, b_train, samples_cv, X_cv, b_cv, samples_test, X_test, b_test

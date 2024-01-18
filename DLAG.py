@@ -937,9 +937,9 @@ class CGenTrainer:
             casedata = reader.read_case_logfile(os.path.join(storage_dir,'DLAG.log'))
             img_dim = casedata.img_size
             if 'xdzdx' in casedata.design_parameters_train.keys():
-                n_dest = len(casedata.design_parameters_train.keys()) + len(casedata.design_parameters_train['xdzdx'][1]) - 1
+                n_dest = 8 + len(casedata.design_parameters_train['xdzdx'][1])
             else:
-                n_dest = len(casedata.design_parameters_train.keys())
+                n_dest = 8
             latent_dim = casedata.training_parameters['latent_dim']
             enc_hidden_layers = casedata.training_parameters['enc_hidden_layers']
             dec_hidden_layers = casedata.training_parameters['dec_hidden_layers']
