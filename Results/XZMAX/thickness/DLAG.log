@@ -1,0 +1,64 @@
+DLAG log file
+==================================================================================================
+->ANALYSIS
+CASE ID=2952
+ANALYSIS=traingenerate
+AIRFOIL DZDX ANALYSIS=thickness
+DESIGN AIRFOIL DZDX ANALYSIS=thickness
+IMPORTED MODEL=0
+LAST TRAINING LOSS=['553.773']
+LAST CV LOSS=['543.311']
+--------------------------------------------------------------------------------------------------
+->TRAINING
+TRAINING SIZE=0.75
+LEARNING RATE=0.015
+L2 REGULARIZER=0.15
+L1 REGULARIZER=0.0
+DROPOUT=0.35
+ACTIVATION=swish
+NUMBER OF EPOCHS=80
+BATCH SIZE=32
+LATENT DIMENSION=20
+ENCODER HIDDEN LAYERS=[200, 50]
+DECODER HIDDEN LAYERS=[50, 200]
+OPTIMIZER=['Adam']
+METRICS=['mean_squared_error']
+--------------------------------------------------------------------------------------------------
+->DESIGN
+DESIGN PARAMETERS TRAIN=['XZMAX']
+--------------------------------------------------------------------------------------------------
+->ARCHITECTURE
+INPUT SHAPE=(150, 100)
+--------------------------------------------------------------------------------------------------
+->MODEL
+Model: "model"
+__________________________________________________________________________________________________
+ Layer (type)                   Output Shape         Param #     Connected to                     
+==================================================================================================
+ input_1 (InputLayer)           [(None, 15000)]      0           []                               
+                                                                                                  
+ input_2 (InputLayer)           [(None, 8)]          0           []                               
+                                                                                                  
+ concatenate (Concatenate)      (None, 15008)        0           ['input_1[0][0]',                
+                                                                  'input_2[0][0]']                
+                                                                                                  
+ encoder_c (Sequential)         (None, 40)           3014890     ['concatenate[0][0]']            
+                                                                                                  
+ lambda (Lambda)                (None, 20)           0           ['encoder_c[0][0]']              
+                                                                                                  
+ lambda_1 (Lambda)              (None, 20)           0           ['encoder_c[0][0]']              
+                                                                                                  
+ lambda_2 (Lambda)              (None, 20)           0           ['lambda[0][0]',                 
+                                                                  'lambda_1[0][0]']               
+                                                                                                  
+ concatenate_1 (Concatenate)    (None, 28)           0           ['lambda_2[0][0]',               
+                                                                  'input_2[0][0]']                
+                                                                                                  
+ decoder_c (Sequential)         (None, 15000)        3027650     ['concatenate_1[0][0]']          
+                                                                                                  
+==================================================================================================
+Total params: 6,042,540
+Trainable params: 6,041,540
+Non-trainable params: 1,000
+__________________________________________________________________________________________________
+==================================================================================================
